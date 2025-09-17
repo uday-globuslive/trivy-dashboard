@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  trivy-dashboard:
+    build: .
+    container_name: trivy-dashboard
+    ports:
+      - "5000:5000"
+    environment:
+      - NEXUS_URL=${NEXUS_URL:-http://localhost:8081}
+      - NEXUS_USERNAME=${NEXUS_USERNAME:-admin}
+      - NEXUS_PASSWORD=${NEXUS_PASSWORD:-admin123}
+      - NEXUS_REPOSITORY=${NEXUS_REPOSITORY:-trivy-reports}
+      - FLASK_ENV=production
+      - FLASK_DEBUG=false
+      - CACHE_TTL=300
+      - DATA_REFRESH_INTERVAL=600
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - trivy-network
+
+  # Optional: Add Nexus Repository if you don't have one
+  nexus:
+    image: sonatype/nexus3:latest
+    container_name: nexus-repository
+    ports:
+      - "8081:8081"
+    volumes:
+      - nexus-data:/nexus-data
+    environment:
+      - INSTALL4J_ADD_VM_PARAMS=-Xms1g -Xmx1g -XX:MaxDirectMemorySize=2g
+    restart: unless-stopped
+    networks:
+      - trivy-network
+
+networks:
+  trivy-network:
+    driver: bridge
+
+volumes:
+  nexus-data:
+    driver: local

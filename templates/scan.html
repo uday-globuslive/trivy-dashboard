@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Scan Details - Trivy Security Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2><i class="fas fa-search me-2"></i>Scan Details</h2>
+        {% if scan %}
+        <p class="text-muted mb-0">Project: {{ scan.project }} | Build: {{ scan.build_number }} | {{ scan.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        {% endif %}
+    </div>
+    <div>
+        <a href="/projects" class="btn btn-outline-secondary me-2">
+            <i class="fas fa-arrow-left me-1"></i>Back to Projects
+        </a>
+        <button class="btn btn-outline-primary" onclick="refreshData()">
+            <i class="fas fa-refresh me-1"></i>Refresh
+        </button>
+    </div>
+</div>
+
+{% if scan %}
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center border-danger">
+            <div class="card-body">
+                <h3 class="text-danger">{{ scan.vulnerability_summary.critical }}</h3>
+                <p class="card-text">Critical</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-warning">
+            <div class="card-body">
+                <h3 class="text-warning">{{ scan.vulnerability_summary.high }}</h3>
+                <p class="card-text">High</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-info">
+            <div class="card-body">
+                <h3 class="text-info">{{ scan.vulnerability_summary.medium }}</h3>
+                <p class="card-text">Medium</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-success">
+            <div class="card-body">
+                <h3 class="text-success">{{ scan.vulnerability_summary.low }}</h3>
+                <p class="card-text">Low</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Vulnerabilities</h5>
+            </div>
+            <div class="card-body">
+                {% if scan.vulnerabilities %}
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>CVE ID</th>
+                                <th>Severity</th>
+                                <th>Component</th>
+                                <th>CVSS Score</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for vuln in scan.vulnerabilities[:50] %}
+                            <tr>
+                                <td>
+                                    <a href="https://nvd.nist.gov/vuln/detail/{{ vuln.id }}" target="_blank" class="text-decoration-none">
+                                        {{ vuln.id }}
+                                    </a>
+                                </td>
+                                <td>
+                                    <span class="badge bg-{{ 'danger' if vuln.severity == 'CRITICAL' else 'warning' if vuln.severity == 'HIGH' else 'info' if vuln.severity == 'MEDIUM' else 'success' }}">
+                                        {{ vuln.severity }}
+                                    </span>
+                                </td>
+                                <td>{{ vuln.affects or 'N/A' }}</td>
+                                <td>{{ vuln.cvss_score or 'N/A' }}</td>
+                                <td class="text-truncate" style="max-width: 300px;" title="{{ vuln.description }}">
+                                    {{ vuln.description[:100] }}...
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if scan.vulnerabilities|length > 50 %}
+                <p class="text-muted">Showing first 50 of {{ scan.vulnerabilities|length }} vulnerabilities.</p>
+                {% endif %}
+                {% else %}
+                <p class="text-muted">No vulnerabilities found in this scan.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card mb-3">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="fas fa-info-circle me-2"></i>Scan Information</h6>
+            </div>
+            <div class="card-body">
+                <dl class="row">
+                    <dt class="col-5">Project:</dt>
+                    <dd class="col-7">{{ scan.project }}</dd>
+                    
+                    <dt class="col-5">Build:</dt>
+                    <dd class="col-7">{{ scan.build_number }}</dd>
+                    
+                    <dt class="col-5">Timestamp:</dt>
+                    <dd class="col-7">{{ scan.timestamp.strftime('%Y-%m-%d %H:%M') }}</dd>
+                    
+                    <dt class="col-5">Total Components:</dt>
+                    <dd class="col-7">{{ scan.components|length }}</dd>
+                    
+                    <dt class="col-5">Risk Score:</dt>
+                    <dd class="col-7">{{ scan.risk_score }}%</dd>
+                </dl>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="fas fa-cubes me-2"></i>Components</h6>
+            </div>
+            <div class="card-body">
+                {% if scan.components %}
+                <div style="max-height: 400px; overflow-y: auto;">
+                    {% for component in scan.components[:20] %}
+                    <div class="mb-2 p-2 bg-light rounded">
+                        <strong>{{ component.name }}</strong>
+                        {% if component.version %}
+                        <br><small class="text-muted">Version: {{ component.version }}</small>
+                        {% endif %}
+                        {% if component.type %}
+                        <br><small class="text-muted">Type: {{ component.type }}</small>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if scan.components|length > 20 %}
+                <p class="text-muted mt-2">Showing first 20 of {{ scan.components|length }} components.</p>
+                {% endif %}
+                {% else %}
+                <p class="text-muted">No components found in this scan.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="text-center py-5">
+    <i class="fas fa-exclamation-triangle fa-3x text-muted mb-3"></i>
+    <h4 class="text-muted">Scan Not Found</h4>
+    <p class="text-muted">The requested scan could not be found or is no longer available.</p>
+    <a href="/projects" class="btn btn-primary">
+        <i class="fas fa-arrow-left me-1"></i>Return to Projects
+    </a>
+</div>
+{% endif %}
+{% endblock %}

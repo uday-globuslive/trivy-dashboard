@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Projects - Trivy Security Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="fas fa-folder me-2"></i>Security Projects Overview</h2>
+    <div>
+        <button class="btn btn-outline-primary" onclick="refreshData()">
+            <i class="fas fa-refresh me-1"></i>Refresh Data
+        </button>
+    </div>
+</div>
+
+{% if projects %}
+<div class="row">
+    {% for project in projects %}
+    <div class="col-lg-4 col-md-6 mb-4">
+        <div class="card project-card h-100" onclick="location.href='/project/{{ project.name }}'">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0 font-weight-bold">{{ project.name }}</h6>
+                <span class="badge bg-{{ 'danger' if project.critical_count > 0 else 'warning' if project.high_count > 0 else 'success' }}">
+                    {{ project.risk_score }}% Risk
+                </span>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-3">
+                        <div class="text-danger font-weight-bold">{{ project.critical_count }}</div>
+                        <small class="text-muted">Critical</small>
+                    </div>
+                    <div class="col-3">
+                        <div class="text-warning font-weight-bold">{{ project.high_count }}</div>
+                        <small class="text-muted">High</small>
+                    </div>
+                    <div class="col-3">
+                        <div class="text-info font-weight-bold">{{ project.medium_count }}</div>
+                        <small class="text-muted">Medium</small>
+                    </div>
+                    <div class="col-3">
+                        <div class="text-success font-weight-bold">{{ project.low_count }}</div>
+                        <small class="text-muted">Low</small>
+                    </div>
+                </div>
+                
+                <hr class="my-3">
+                
+                <div class="d-flex justify-content-between align-items-center">
+                    <small class="text-muted">
+                        <i class="fas fa-clock me-1"></i>
+                        {% if project.last_scan %}
+                            Last scan: {{ project.last_scan.strftime('%Y-%m-%d %H:%M') if project.last_scan else 'Never' }}
+                        {% else %}
+                            No scans yet
+                        {% endif %}
+                    </small>
+                </div>
+                
+                <div class="mt-2">
+                    <div class="progress progress-thin">
+                        <div class="progress-bar bg-{{ 'danger' if project.risk_score >= 80 else 'warning' if project.risk_score >= 40 else 'success' }}" 
+                             style="width: {{ project.risk_score }}%"></div>
+                    </div>
+                    <small class="text-muted">Risk Score: {{ project.risk_score }}%</small>
+                </div>
+            </div>
+            <div class="card-footer bg-transparent">
+                <div class="d-flex justify-content-between">
+                    <small class="text-muted">
+                        <i class="fas fa-search me-1"></i>{{ project.scans|length }} scans
+                    </small>
+                    <small class="text-muted">
+                        <i class="fas fa-exclamation-triangle me-1"></i>{{ project.total_vulnerabilities }} total vulns
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-5">
+    <i class="fas fa-folder-open fa-3x text-muted mb-3"></i>
+    <h4 class="text-muted">No Projects Found</h4>
+    <p class="text-muted">No security scan data available. Make sure CycloneDX files are uploaded to Nexus Repository.</p>
+    <button class="btn btn-primary" onclick="refreshData()">
+        <i class="fas fa-refresh me-1"></i>Refresh Data
+    </button>
+</div>
+{% endif %}
+{% endblock %}

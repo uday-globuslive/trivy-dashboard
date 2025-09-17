@@ -1,0 +1,506 @@
+{% extends "base.html" %}
+
+{% block title %}Security Dashboard - Trivy{% endblock %}
+
+{% block content %}
+<!-- Dashboard Summary Cards -->
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            Total Projects
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_projects }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-folder fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            Total Scans
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_scans }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-search fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            Total Vulnerabilities
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_vulnerabilities }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-danger shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
+                            Critical Projects
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ critical_projects }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-shield-alt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="row mb-4">
+    <!-- Vulnerability Trends Chart -->
+    <div class="col-xl-8 col-lg-7">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-chart-line me-2"></i>
+                    Vulnerability Trends (Last 30 Days)
+                </h6>
+                <div class="dropdown no-arrow">
+                    <a class="dropdown-toggle" href="#" role="button" id="dropdownMenuLink"
+                        data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
+                    </a>
+                    <div class="dropdown-menu dropdown-menu-right shadow animated--fade-in">
+                        <div class="dropdown-header">Chart Options:</div>
+                        <a class="dropdown-item" href="#" onclick="exportChart('trendsChart')">Export Chart</a>
+                        <a class="dropdown-item" href="#" onclick="refreshChart('trendsChart')">Refresh Data</a>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="chart-area">
+                    <canvas id="trendsChart" width="400" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Severity Distribution Pie Chart -->
+    <div class="col-xl-4 col-lg-5">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-chart-pie me-2"></i>
+                    Current Severity Distribution
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="chart-pie pt-4 pb-2">
+                    <canvas id="severityChart" width="400" height="300"></canvas>
+                </div>
+                <div class="mt-4 text-center small">
+                    <span class="mr-2">
+                        <i class="fas fa-circle text-danger"></i> Critical
+                    </span>
+                    <span class="mr-2">
+                        <i class="fas fa-circle text-warning"></i> High
+                    </span>
+                    <span class="mr-2">
+                        <i class="fas fa-circle text-info"></i> Medium
+                    </span>
+                    <span class="mr-2">
+                        <i class="fas fa-circle text-success"></i> Low
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Activity and Top Vulnerabilities -->
+<div class="row">
+    <!-- Recent Scans -->
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-history me-2"></i>
+                    Recent Security Scans
+                </h6>
+            </div>
+            <div class="card-body">
+                <div id="recent-scans-list">
+                    <!-- Content will be loaded via JavaScript -->
+                    <div class="d-flex justify-content-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Vulnerabilities -->
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-bug me-2"></i>
+                    Most Common Vulnerabilities
+                </h6>
+            </div>
+            <div class="card-body">
+                <div id="top-vulnerabilities-list">
+                    <!-- Content will be loaded via JavaScript -->
+                    <div class="d-flex justify-content-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Security Metrics Overview -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-chart-bar me-2"></i>
+                    Security Metrics Overview
+                </h6>
+            </div>
+            <div class="card-body">
+                <div id="metrics-overview">
+                    <!-- Content will be loaded via JavaScript -->
+                    <div class="d-flex justify-content-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize charts
+    initializeTrendsChart();
+    initializeSeverityChart();
+    loadRecentScans();
+    loadTopVulnerabilities();
+    loadMetricsOverview();
+});
+
+function initializeTrendsChart() {
+    fetch('/api/metrics/trends')
+        .then(response => response.json())
+        .then(data => {
+            const ctx = document.getElementById('trendsChart').getContext('2d');
+            
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.timestamps || [],
+                    datasets: [
+                        {
+                            label: 'Critical',
+                            data: data.critical_counts || [],
+                            borderColor: 'rgb(220, 53, 69)',
+                            backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                            tension: 0.1,
+                            fill: false
+                        },
+                        {
+                            label: 'High',
+                            data: data.high_counts || [],
+                            borderColor: 'rgb(255, 193, 7)',
+                            backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                            tension: 0.1,
+                            fill: false
+                        },
+                        {
+                            label: 'Medium',
+                            data: data.medium_counts || [],
+                            borderColor: 'rgb(255, 165, 0)',
+                            backgroundColor: 'rgba(255, 165, 0, 0.1)',
+                            tension: 0.1,
+                            fill: false
+                        },
+                        {
+                            label: 'Low',
+                            data: data.low_counts || [],
+                            borderColor: 'rgb(40, 167, 69)',
+                            backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                            tension: 0.1,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Vulnerability Count'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Date'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Vulnerability Trends Over Time'
+                        },
+                        legend: {
+                            position: 'top'
+                        }
+                    }
+                }
+            });
+        })
+        .catch(error => {
+            console.error('Error loading trends chart:', error);
+            document.getElementById('trendsChart').parentElement.innerHTML = 
+                '<p class="text-muted">Unable to load trends chart</p>';
+        });
+}
+
+function initializeSeverityChart() {
+    // This would typically get current vulnerability distribution
+    const data = {
+        labels: ['Critical', 'High', 'Medium', 'Low', 'Info'],
+        datasets: [{
+            data: [5, 15, 25, 30, 10], // Placeholder data
+            backgroundColor: [
+                'rgb(220, 53, 69)',
+                'rgb(255, 193, 7)',
+                'rgb(255, 165, 0)',
+                'rgb(40, 167, 69)',
+                'rgb(108, 117, 125)'
+            ]
+        }]
+    };
+
+    const ctx = document.getElementById('severityChart').getContext('2d');
+    
+    new Chart(ctx, {
+        type: 'doughnut',
+        data: data,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false // We have custom legend below
+                }
+            }
+        }
+    });
+}
+
+function loadRecentScans() {
+    fetch('/api/projects')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('recent-scans-list');
+            
+            if (data.projects && data.projects.length > 0) {
+                // Sort by last scan date and take first 5
+                const recentProjects = data.projects
+                    .filter(p => p.last_scan)
+                    .sort((a, b) => new Date(b.last_scan) - new Date(a.last_scan))
+                    .slice(0, 5);
+                
+                const html = recentProjects.map(project => `
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="flex-shrink-0">
+                            <div class="rounded-circle bg-${getSeverityColor(project)} p-2">
+                                <i class="fas fa-project-diagram text-white"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1 ms-3">
+                            <div class="fw-bold">
+                                <a href="/project/${project.name}" class="text-decoration-none">
+                                    ${project.name}
+                                </a>
+                            </div>
+                            <small class="text-muted">
+                                ${project.total_vulnerabilities} vulnerabilities found
+                                <span data-timestamp="${project.last_scan}"></span>
+                            </small>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <span class="badge bg-${getSeverityColor(project)}">
+                                Risk: ${project.risk_score}%
+                            </span>
+                        </div>
+                    </div>
+                `).join('');
+                
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="text-muted text-center">No recent scans found</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading recent scans:', error);
+            document.getElementById('recent-scans-list').innerHTML = 
+                '<p class="text-danger text-center">Failed to load recent scans</p>';
+        });
+}
+
+function loadTopVulnerabilities() {
+    fetch('/api/vulnerabilities/top')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('top-vulnerabilities-list');
+            
+            if (data.vulnerabilities && data.vulnerabilities.length > 0) {
+                const html = data.vulnerabilities.slice(0, 5).map(vuln => `
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="flex-shrink-0">
+                            <span class="badge bg-${getSeverityColorFromString(vuln.severity)} rounded-pill">
+                                ${vuln.severity}
+                            </span>
+                        </div>
+                        <div class="flex-grow-1 ms-3">
+                            <div class="fw-bold">${vuln.id}</div>
+                            <small class="text-muted">${truncateText(vuln.description, 60)}</small>
+                        </div>
+                        <div class="flex-shrink-0 text-end">
+                            <div class="fw-bold">${vuln.count}</div>
+                            <small class="text-muted">${vuln.projects_affected} projects</small>
+                        </div>
+                    </div>
+                `).join('');
+                
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="text-muted text-center">No vulnerability data available</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading top vulnerabilities:', error);
+            document.getElementById('top-vulnerabilities-list').innerHTML = 
+                '<p class="text-danger text-center">Failed to load vulnerability data</p>';
+        });
+}
+
+function loadMetricsOverview() {
+    fetch('/api/metrics/trends')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('metrics-overview');
+            
+            const html = `
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <div class="text-center">
+                            <div class="h4 mb-0 text-primary">${data.last_7_days?.total_scans || 0}</div>
+                            <small class="text-muted">Scans (7 days)</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="text-center">
+                            <div class="h4 mb-0 text-warning">${data.last_7_days?.total_vulnerabilities || 0}</div>
+                            <small class="text-muted">Vulnerabilities (7 days)</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="text-center">
+                            <div class="h4 mb-0 text-info">${data.last_7_days?.avg_risk_score || 0}%</div>
+                            <small class="text-muted">Avg Risk Score (7 days)</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="text-center">
+                            <div class="h4 mb-0 text-success">${data.last_7_days?.projects_scanned || 0}</div>
+                            <small class="text-muted">Projects Scanned (7 days)</small>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            container.innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Error loading metrics overview:', error);
+            document.getElementById('metrics-overview').innerHTML = 
+                '<p class="text-danger text-center">Failed to load metrics</p>';
+        });
+}
+
+function getSeverityColor(project) {
+    if (project.critical_count > 0) return 'danger';
+    if (project.high_count > 0) return 'warning';
+    if (project.medium_count > 0) return 'info';
+    return 'success';
+}
+
+function getSeverityColorFromString(severity) {
+    switch(severity.toUpperCase()) {
+        case 'CRITICAL': return 'danger';
+        case 'HIGH': return 'warning';
+        case 'MEDIUM': return 'info';
+        case 'LOW': return 'success';
+        default: return 'secondary';
+    }
+}
+
+function truncateText(text, maxLength) {
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+}
+
+function exportChart(chartId) {
+    // Implement chart export functionality
+    showAlert('Chart export feature coming soon!', 'info');
+}
+
+function refreshChart(chartId) {
+    // Implement chart refresh functionality
+    showAlert('Refreshing chart data...', 'info');
+    location.reload();
+}
+</script>
+{% endblock %}

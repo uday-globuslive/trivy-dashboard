@@ -1,0 +1,409 @@
+/* Trivy Security Dashboard - Custom Styles */
+
+/* Global Styles */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fc;
+}
+
+/* Card Enhancements */
+.card {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15);
+}
+
+.card-header {
+    background-color: transparent;
+    border-bottom: 1px solid #e3e6f0;
+}
+
+/* Border Left Cards for Dashboard */
+.border-left-primary {
+    border-left: 0.25rem solid #4e73df !important;
+}
+
+.border-left-success {
+    border-left: 0.25rem solid #1cc88a !important;
+}
+
+.border-left-info {
+    border-left: 0.25rem solid #36b9cc !important;
+}
+
+.border-left-warning {
+    border-left: 0.25rem solid #f6c23e !important;
+}
+
+.border-left-danger {
+    border-left: 0.25rem solid #e74a3b !important;
+}
+
+/* Text Utilities */
+.text-xs {
+    font-size: 0.7rem;
+}
+
+.text-gray-300 {
+    color: #dddfeb !important;
+}
+
+.text-gray-800 {
+    color: #5a5c69 !important;
+}
+
+/* Chart Containers */
+.chart-area {
+    position: relative;
+    height: 10rem;
+    width: 100%;
+}
+
+.chart-pie {
+    position: relative;
+    height: 15rem;
+    width: 100%;
+}
+
+.chart-bar {
+    position: relative;
+    height: 10rem;
+    width: 100%;
+}
+
+/* Custom Navbar */
+.navbar-brand {
+    font-weight: 700;
+    font-size: 1.2rem;
+}
+
+.navbar-nav .nav-link {
+    font-weight: 500;
+}
+
+.navbar-nav .nav-link.active {
+    color: #fff !important;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 5px;
+}
+
+/* Loading Indicators */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Severity Badges */
+.severity-critical {
+    background-color: #dc3545;
+    color: white;
+}
+
+.severity-high {
+    background-color: #fd7e14;
+    color: white;
+}
+
+.severity-medium {
+    background-color: #ffc107;
+    color: black;
+}
+
+.severity-low {
+    background-color: #28a745;
+    color: white;
+}
+
+.severity-info {
+    background-color: #6c757d;
+    color: white;
+}
+
+.severity-unknown {
+    background-color: #343a40;
+    color: white;
+}
+
+/* Risk Score Indicators */
+.risk-score {
+    font-weight: bold;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+}
+
+.risk-critical {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.risk-high {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+.risk-medium {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #b8daff;
+}
+
+.risk-low {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+/* Project Cards */
+.project-card {
+    transition: transform 0.2s ease-in-out;
+    cursor: pointer;
+}
+
+.project-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 0.5rem 2rem 0 rgba(58, 59, 69, 0.2);
+}
+
+/* Vulnerability Lists */
+.vulnerability-item {
+    border-left: 4px solid transparent;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    background-color: #fff;
+    border-radius: 0.25rem;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.vulnerability-item.critical {
+    border-left-color: #dc3545;
+}
+
+.vulnerability-item.high {
+    border-left-color: #fd7e14;
+}
+
+.vulnerability-item.medium {
+    border-left-color: #ffc107;
+}
+
+.vulnerability-item.low {
+    border-left-color: #28a745;
+}
+
+/* Data Tables */
+.table-responsive-stack tr {
+    display: block;
+    border: 1px solid #dee2e6;
+    margin-bottom: 10px;
+    border-radius: 5px;
+}
+
+.table-responsive-stack td {
+    display: block;
+    text-align: right;
+    padding-left: 50%;
+    border: none;
+    position: relative;
+}
+
+.table-responsive-stack td:before {
+    content: attr(data-label);
+    position: absolute;
+    left: 6px;
+    width: 45%;
+    text-align: left;
+    font-weight: bold;
+}
+
+/* Mobile Responsive Adjustments */
+@media (max-width: 768px) {
+    .chart-area {
+        height: 15rem;
+    }
+    
+    .card-body {
+        padding: 1rem;
+    }
+    
+    .navbar-brand {
+        font-size: 1rem;
+    }
+    
+    .h5 {
+        font-size: 1rem;
+    }
+}
+
+/* Scan Details */
+.scan-metadata {
+    background-color: #f8f9fa;
+    border-radius: 0.375rem;
+    padding: 1rem;
+}
+
+.component-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.component-item {
+    border: 1px solid #e9ecef;
+    border-radius: 0.25rem;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    background-color: #fff;
+}
+
+/* Animation Classes */
+.fade-in {
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.slide-up {
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Progress Bars */
+.progress-thin {
+    height: 0.5rem;
+}
+
+.progress-thick {
+    height: 1.5rem;
+}
+
+/* Footer */
+footer {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+footer a:hover {
+    color: #fff !important;
+    text-decoration: underline !important;
+}
+
+/* Dashboard Widgets */
+.widget {
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.widget-icon {
+    font-size: 3rem;
+    opacity: 0.3;
+}
+
+/* Status Indicators */
+.status-online {
+    color: #28a745;
+}
+
+.status-warning {
+    color: #ffc107;
+}
+
+.status-error {
+    color: #dc3545;
+}
+
+.status-info {
+    color: #17a2b8;
+}
+
+/* Tooltip Enhancements */
+.tooltip-inner {
+    background-color: #2c3e50;
+    color: #fff;
+    border-radius: 0.375rem;
+}
+
+.tooltip .arrow::before {
+    border-top-color: #2c3e50;
+}
+
+/* Print Styles */
+@media print {
+    .navbar,
+    .dropdown,
+    .btn,
+    footer {
+        display: none !important;
+    }
+    
+    .card {
+        box-shadow: none !important;
+        border: 1px solid #ddd !important;
+    }
+    
+    .container-fluid {
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+}
+
+/* Dark Mode Support (Future Enhancement) */
+@media (prefers-color-scheme: dark) {
+    .card {
+        background-color: #2c3e50;
+        color: #ecf0f1;
+    }
+    
+    body {
+        background-color: #34495e;
+        color: #ecf0f1;
+    }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
