@@ -21,6 +21,12 @@ class Config:
     NEXUS_REPOSITORY = os.environ.get('NEXUS_REPOSITORY', 'trivy-sbom')
     NEXUS_TIMEOUT = int(os.environ.get('NEXUS_TIMEOUT', 30))
     
+    # Generic Nexus artifact pattern settings
+    NEXUS_GROUP_ID = os.environ.get('NEXUS_GROUP_ID', 'com.example')
+    NEXUS_ARTIFACT_SUFFIX = os.environ.get('NEXUS_ARTIFACT_SUFFIX', '.sbom')
+    NEXUS_VERSION_PREFIX = os.environ.get('NEXUS_VERSION_PREFIX', '1.0.0-')
+    NEXUS_ASSET_EXTENSION = os.environ.get('NEXUS_ASSET_EXTENSION', 'json')
+    
     # Data refresh settings
     REFRESH_INTERVAL = int(os.environ.get('REFRESH_INTERVAL', 300))  # 5 minutes
     CACHE_TTL = int(os.environ.get('CACHE_TTL', 3600))  # 1 hour

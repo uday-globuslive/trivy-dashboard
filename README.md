@@ -65,11 +65,20 @@ pip install -r requirements.txt
 
 ### 2. Configure Nexus Connection
 ```bash
-# Set environment variables or edit config.py
-export NEXUS_URL="http://your-nexus.company.com:8081"
-export NEXUS_USERNAME="your-username"
-export NEXUS_PASSWORD="your-password"
-export NEXUS_REPOSITORY="trivy-sbom"
+# Copy and edit environment file
+cp .env.example .env
+
+# Set your Nexus configuration in .env:
+NEXUS_URL=http://your-nexus.company.com:8081
+NEXUS_USERNAME=your-username
+NEXUS_PASSWORD=your-password
+NEXUS_REPOSITORY=your-sbom-repo
+
+# Configure for your Jenkins upload pattern:
+NEXUS_GROUP_ID=com.yourcompany
+NEXUS_ARTIFACT_SUFFIX=.sbom
+NEXUS_VERSION_PREFIX=1.0.0-
+NEXUS_ASSET_EXTENSION=json
 ```
 
 ### 3. Run Dashboard
@@ -211,19 +220,68 @@ python app.py
 
 ## 🚀 Deployment
 
-### Docker Deployment
+### Docker Hub Image (Recommended)
 ```bash
+# Pull the latest image
+docker pull yourusername/trivy-security-dashboard:latest
+
+# Run with your configuration
+docker run -d \
+  --name trivy-dashboard \
+  -p 5000:5000 \
+  -e NEXUS_URL=http://your-nexus.company.com:8081 \
+  -e NEXUS_USERNAME=your-username \
+  -e NEXUS_PASSWORD=your-password \
+  -e NEXUS_REPOSITORY=your-sbom-repo \
+  -e NEXUS_GROUP_ID=com.yourcompany \
+  -e NEXUS_ARTIFACT_SUFFIX=.sbom \
+  -e NEXUS_VERSION_PREFIX=1.0.0- \
+  -e NEXUS_ASSET_EXTENSION=json \
+  --restart unless-stopped \
+  yourusername/trivy-security-dashboard:latest
+```
+
+### Docker Compose (Easy Setup)
+```bash
+# Clone repository and configure
+git clone https://github.com/yourusername/trivy-security-dashboard
+cd trivy-security-dashboard
+cp .env.example .env
+# Edit .env with your settings
+
+# Start services
+docker-compose up -d
+```
+
+### Build from Source
+```bash
+# Build custom image
 docker build -t trivy-dashboard .
-docker run -p 5000:5000 \
-  -e NEXUS_URL=http://nexus.company.com:8081 \
-  -e NEXUS_USERNAME=username \
-  -e NEXUS_PASSWORD=password \
+
+# Run with environment file
+docker run -d \
+  --name trivy-dashboard \
+  -p 5000:5000 \
+  --env-file .env \
+  --restart unless-stopped \
   trivy-dashboard
 ```
 
+### Generic Configuration
+The dashboard supports any Nexus Maven repository structure through environment variables:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `NEXUS_GROUP_ID` | Maven groupId | `com.mccamish` |
+| `NEXUS_ARTIFACT_SUFFIX` | Artifact suffix | `.sbom` |
+| `NEXUS_VERSION_PREFIX` | Version prefix | `1.0.0-` |
+| `NEXUS_ASSET_EXTENSION` | File extension | `json` |
+
 ### Production Considerations
-- Use WSGI server (Gunicorn, uWSGI)
-- Configure reverse proxy (Nginx, Apache)
-- Set up SSL/TLS certificates
-- Implement monitoring and logging
-- Configure backup and disaster recovery
+- **Security**: Use non-root user (automatically configured)
+- **Monitoring**: Built-in health check at `/api/health`
+- **Logging**: Configure `LOG_LEVEL` and `LOG_FILE` 
+- **Performance**: Adjust `CACHE_TTL` and `DATA_REFRESH_INTERVAL`
+- **SSL/TLS**: Use reverse proxy (Nginx, Apache, Traefik)
+- **High Availability**: Deploy multiple instances with load balancer
+- **Backup**: Monitor Nexus repository availability

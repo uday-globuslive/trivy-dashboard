@@ -47,67 +47,131 @@ class NexusClient:
     
     def list_sbom_files(self, limit=1000):
         """
-        List all SBOM files in the Nexus repository
+        List all SBOM files (CycloneDX JSON) in the Nexus repository.
         
-        Returns list of SBOM file metadata including:
-        - path: Full path to the file
-        - project: Project name extracted from path
-        - build_number: Build number from artifact version
-        - timestamp: File upload timestamp
-        - size: File size in bytes
+        Handles McCamish Nexus structure:
+        - Repository: mccamish_sbom
+        - Path: com/mccamish/{project}.sbom/{version}/{project}.sbom-{version}.json
+        - Example: com/mccamish/AGP_Stellar_SSO.sbom/1.0.0-20250521034211/AGP_Stellar_SSO.sbom-1.0.0-20250521034211.json
         """
-        logger.info(f"📋 Listing SBOM files from repository: {self.repository}")
+        from config import Config
         
+        logger.info(f"📋 Listing SBOM files from repository: {self.repository}")
+        logger.info(f"🔍 Searching for: groupId={Config.NEXUS_GROUP_ID}, suffix={Config.NEXUS_ARTIFACT_SUFFIX}, extension={Config.NEXUS_ASSET_EXTENSION}")
+        logger.info(f"🌐 Nexus URL: {self.nexus_url}")
+        
+        sbom_files = []
         try:
-            # Use Nexus search API to find CycloneDX files
-            search_url = f"{self.nexus_url}/service/rest/v1/search"
+            # Use assets search API for better filtering
+            search_url = f"{self.nexus_url}/service/rest/v1/search/assets"
             params = {
                 'repository': self.repository,
-                'format': 'maven2',
-                'sort': 'version',
-                'direction': 'desc'
+                'group': Config.NEXUS_GROUP_ID,
+                'extension': Config.NEXUS_ASSET_EXTENSION
             }
             
-            response = self.session.get(search_url, params=params)
-            response.raise_for_status()
+            logger.info(f"🔍 Search URL: {search_url}")
+            logger.info(f"📋 Search params: {params}")
             
-            search_results = response.json()
-            sbom_files = []
+            continuation_token = None
+            processed_count = 0
             
-            for item in search_results.get('items', []):
-                try:
-                    # Parse artifact information
-                    group_id = item.get('group', '')
-                    artifact_id = item.get('name', '')
-                    version = item.get('version', '')
+            while processed_count < limit:
+                if continuation_token:
+                    params['continuationToken'] = continuation_token
                     
-                    # Extract project name (typically the artifact ID)
-                    project_name = artifact_id
-                    
-                    # Extract build number from version
-                    build_number = self._extract_build_number(version)
-                    
-                    # Get download URL
-                    download_url = item.get('assets', [{}])[0].get('downloadUrl', '')
-                    
-                    if download_url and download_url.endswith('.json'):
+                response = self.session.get(search_url, params=params, timeout=30)
+                response.raise_for_status()
+                
+                search_results = response.json()
+                items = search_results.get('items', [])
+                
+                logger.info(f"📦 Found {len(items)} assets in this batch")
+                
+                if not items:
+                    break
+                
+                for asset in items:
+                    try:
+                        # Parse asset path: com/mccamish/AGP_Stellar_SSO.sbom/1.0.0-20250521034211/AGP_Stellar_SSO.sbom-1.0.0-20250521034211.json
+                        asset_path = asset.get('path', '')
+                        download_url = asset.get('downloadUrl', '')
+                        
+                        logger.debug(f"🔍 Processing asset: {asset_path}")
+                        
+                        # Skip checksum files
+                        if asset_path.endswith(('.json.sha1', '.json.sha256', '.json.sha512', '.json.md5')):
+                            logger.debug(f"⏭️ Skipping checksum file: {asset_path}")
+                            continue
+                            
+                        # Only process JSON files
+                        if not asset_path.endswith('.json'):
+                            logger.debug(f"⏭️ Skipping non-JSON file: {asset_path}")
+                            continue
+                        
+                        # Parse Maven path structure: com/mccamish/{artifactId}/{version}/{filename}
+                        path_parts = asset_path.split('/')
+                        if len(path_parts) < 4:
+                            logger.debug(f"⏭️ Skipping asset with insufficient path parts: {asset_path}")
+                            continue
+                            
+                        # Extract components from path
+                        group_parts = path_parts[:-3]  # ['com', 'mccamish']
+                        artifact_id = path_parts[-3]   # e.g., 'AGP_Stellar_SSO.sbom'
+                        version = path_parts[-2]       # e.g., '1.0.0-20250521034211'
+                        filename = path_parts[-1]      # e.g., 'AGP_Stellar_SSO.sbom-1.0.0-20250521034211.json'
+                        
+                        logger.debug(f"📦 Parsed: artifact={artifact_id}, version={version}, filename={filename}")
+                        
+                        # Extract project name by removing suffix
+                        project_name = artifact_id.replace(Config.NEXUS_ARTIFACT_SUFFIX, '') if Config.NEXUS_ARTIFACT_SUFFIX else artifact_id
+                        
+                        # Extract build number from version (timestamp part)
+                        build_number = self._extract_build_number(version)
+                        
+                        # Get timestamp from Nexus metadata
+                        timestamp = self._parse_timestamp(asset.get('lastModified', ''))
+                        
+                        # Construct proper download URL - use downloadUrl from API if available
+                        final_download_url = download_url if download_url else f"{self.nexus_url}/repository/{self.repository}/{asset_path}"
+                        
                         sbom_file = {
-                            'path': download_url,
+                            'path': final_download_url,
                             'project': project_name,
                             'build_number': build_number,
-                            'timestamp': self._parse_timestamp(item.get('lastModified', '')),
-                            'size': item.get('assets', [{}])[0].get('fileSize', 0),
-                            'group_id': group_id,
+                            'timestamp': timestamp,
+                            'size': asset.get('fileSize', 0),
+                            'group_id': '/'.join(group_parts),  # 'com/mccamish'
                             'artifact_id': artifact_id,
-                            'version': version
+                            'version': version,
+                            'filename': filename,
+                            'asset_path': asset_path
                         }
-                        sbom_files.append(sbom_file)
                         
-                except Exception as e:
-                    logger.warning(f"⚠️ Error parsing SBOM file metadata: {str(e)}")
-                    continue
+                        logger.debug(f"✅ Added SBOM file: {project_name} - {version}")
+                        sbom_files.append(sbom_file)
+                        processed_count += 1
+                        
+                        if processed_count >= limit:
+                            break
+                            
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error parsing asset {asset.get('path', 'unknown')}: {str(e)}")
+                        continue
+                
+                # Check for continuation token
+                continuation_token = search_results.get('continuationToken')
+                if not continuation_token:
+                    break
             
             logger.info(f"📦 Found {len(sbom_files)} SBOM files")
+            
+            # Log a few examples for debugging
+            if sbom_files:
+                logger.info("📋 Sample SBOM files found:")
+                for i, sbom in enumerate(sbom_files[:3]):
+                    logger.info(f"  {i+1}. {sbom['project']} - {sbom['version']} - {sbom['path']}")
+            
             return sbom_files
             
         except Exception as e:
@@ -131,7 +195,10 @@ class NexusClient:
             if sbom_path.startswith('http'):
                 download_url = sbom_path
             else:
+                # Construct proper repository URL for McCamish Nexus
                 download_url = f"{self.nexus_url}/repository/{self.repository}/{sbom_path}"
+            
+            logger.debug(f"🌐 Download URL: {download_url}")
             
             response = self.session.get(download_url, timeout=30)
             response.raise_for_status()
@@ -140,8 +207,21 @@ class NexusClient:
             sbom_content = response.json()
             logger.debug(f"✅ Successfully downloaded SBOM ({len(response.content)} bytes)")
             
+            # Log basic SBOM info for debugging
+            if isinstance(sbom_content, dict):
+                logger.debug(f"📋 SBOM type: {sbom_content.get('bomFormat', 'unknown')}")
+                logger.debug(f"📋 SBOM version: {sbom_content.get('specVersion', 'unknown')}")
+                if 'metadata' in sbom_content:
+                    metadata = sbom_content['metadata']
+                    if 'component' in metadata:
+                        comp = metadata['component']
+                        logger.debug(f"📋 Component: {comp.get('name', 'unknown')} v{comp.get('version', 'unknown')}")
+            
             return sbom_content
             
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"❌ HTTP Error downloading SBOM {sbom_path}: {e.response.status_code} - {e.response.text}")
+            raise
         except Exception as e:
             logger.error(f"❌ Error downloading SBOM {sbom_path}: {str(e)}")
             raise
@@ -198,14 +278,23 @@ class NexusClient:
             return []
     
     def _extract_build_number(self, version_string):
-        """Extract build number from version string"""
+        """Extract build number from version string (handles patterns like 1.0.0-20250521034211)"""
+        from config import Config
+        
         try:
-            # Common patterns for build numbers in versions
+            # First try to extract based on version prefix
+            if Config.NEXUS_VERSION_PREFIX and version_string.startswith(Config.NEXUS_VERSION_PREFIX):
+                suffix = version_string[len(Config.NEXUS_VERSION_PREFIX):]
+                if suffix.isdigit():
+                    return int(suffix)
+            
+            # Fallback patterns for build numbers
             patterns = [
+                r'-(\d{8,})',       # timestamp pattern like -20250521034211
                 r'build[_-](\d+)',  # build_123, build-123
-                r'(\d+)$',          # version ending with number
+                r'-(\d+)$',         # version-123
                 r'\.(\d+)$',        # version.123
-                r'-(\d+)$'          # version-123
+                r'(\d+)$'           # version ending with number
             ]
             
             for pattern in patterns:

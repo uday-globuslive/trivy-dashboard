@@ -158,6 +158,112 @@ def refresh_data_background():
 refresh_thread = threading.Thread(target=refresh_data_background, daemon=True)
 refresh_thread.start()
 
+@app.route('/debug/nexus')
+def debug_nexus():
+    """Debug endpoint to inspect Nexus connection and SBOM discovery"""
+    logger.info("🔧 Debug: Nexus connection and SBOM discovery")
+    
+    debug_info = {
+        'nexus_config': {
+            'url': Config.NEXUS_URL,
+            'repository': Config.NEXUS_REPOSITORY,
+            'username': Config.NEXUS_USERNAME,
+            'group_id': Config.NEXUS_GROUP_ID,
+            'artifact_suffix': Config.NEXUS_ARTIFACT_SUFFIX,
+            'version_prefix': Config.NEXUS_VERSION_PREFIX,
+            'asset_extension': Config.NEXUS_ASSET_EXTENSION
+        },
+        'connection_test': False,
+        'sbom_files': [],
+        'error_message': None,
+        'api_endpoints': {},
+        'test_results': {}
+    }
+    
+    try:
+        # Test basic connection
+        debug_info['connection_test'] = nexus_client.test_connection()
+        
+        # Test various API endpoints
+        api_tests = {
+            'status': f"{Config.NEXUS_URL}/service/rest/v1/status",
+            'repositories': f"{Config.NEXUS_URL}/service/rest/v1/repositories",
+            'search_assets': f"{Config.NEXUS_URL}/service/rest/v1/search/assets",
+            'repository_info': f"{Config.NEXUS_URL}/service/rest/v1/repositories/{Config.NEXUS_REPOSITORY}",
+            'browse_repo': f"{Config.NEXUS_URL}/repository/{Config.NEXUS_REPOSITORY}/com/mccamish/"
+        }
+        
+        debug_info['api_endpoints'] = api_tests
+        
+        # Test each endpoint
+        for name, url in api_tests.items():
+            try:
+                response = nexus_client.session.get(url, timeout=10)
+                debug_info['test_results'][name] = {
+                    'status_code': response.status_code,
+                    'success': response.status_code < 400,
+                    'error': None if response.status_code < 400 else response.text[:200]
+                }
+            except Exception as e:
+                debug_info['test_results'][name] = {
+                    'status_code': None,
+                    'success': False,
+                    'error': str(e)
+                }
+        
+        # Try to list SBOM files with detailed logging
+        logger.info("🔍 Attempting to list SBOM files...")
+        sbom_files = nexus_client.list_sbom_files(limit=10)
+        debug_info['sbom_files'] = sbom_files
+        debug_info['files_found'] = len(sbom_files)
+        
+        # Test specific McCamish patterns
+        debug_info['mccamish_patterns'] = {
+            'expected_path_pattern': f"com/mccamish/{{project}}.sbom/{{version}}/{{project}}.sbom-{{version}}.json",
+            'example_path': "com/mccamish/AGP_Stellar_SSO.sbom/1.0.0-20250521034211/AGP_Stellar_SSO.sbom-1.0.0-20250521034211.json",
+            'search_params': {
+                'repository': Config.NEXUS_REPOSITORY,
+                'group': Config.NEXUS_GROUP_ID,
+                'extension': Config.NEXUS_ASSET_EXTENSION
+            }
+        }
+        
+        # Get repository info
+        try:
+            repo_info = nexus_client.get_repository_info()
+            debug_info['repository_info'] = repo_info
+        except Exception as e:
+            debug_info['repository_info'] = {'error': str(e)}
+        
+        # If we found files, try to download one as a test
+        if sbom_files:
+            test_file = sbom_files[0]
+            debug_info['download_test'] = {
+                'test_file': test_file['filename'],
+                'download_url': test_file['path'],
+                'success': False,
+                'error': None,
+                'sample_content': None
+            }
+            
+            try:
+                sbom_content = nexus_client.download_sbom(test_file['path'])
+                debug_info['download_test']['success'] = True
+                debug_info['download_test']['sample_content'] = {
+                    'bomFormat': sbom_content.get('bomFormat', 'unknown'),
+                    'specVersion': sbom_content.get('specVersion', 'unknown'),
+                    'component_count': len(sbom_content.get('components', [])),
+                    'vulnerability_count': len(sbom_content.get('vulnerabilities', []))
+                }
+            except Exception as e:
+                debug_info['download_test']['error'] = str(e)
+        
+    except Exception as e:
+        debug_info['error_message'] = str(e)
+        logger.error(f"❌ Debug endpoint error: {str(e)}")
+    
+    return jsonify(debug_info)
+
 @app.route('/')
 def dashboard():
     """Main dashboard view"""
@@ -365,7 +471,7 @@ def manual_refresh():
         'last_updated': app_data['last_updated'].isoformat() if app_data['last_updated'] else None
     })
 
-@app.route('/health')
+@app.route('/api/health')
 def health_check():
     """Health check endpoint"""
     return jsonify({
@@ -392,10 +498,20 @@ def not_found_error(error):
 if __name__ == '__main__':
     logger.info("🚀 Starting Trivy Security Dashboard")
     logger.info(f"🔗 Nexus URL: {Config.NEXUS_URL}")
-    logger.info(f"📊 Dashboard will be available at http://localhost:{Config.PORT}")
+    logger.info(f"� Repository: {Config.NEXUS_REPOSITORY}")
+    logger.info(f"🏷️ Group ID: {Config.NEXUS_GROUP_ID}")
+    logger.info(f"📄 Artifact Suffix: {Config.NEXUS_ARTIFACT_SUFFIX}")
+    logger.info(f"�📊 Dashboard will be available at http://localhost:{Config.PORT}")
+    logger.info(f"🔧 Debug endpoint: http://localhost:{Config.PORT}/debug/nexus")
     
-    # Initial data load
-    logger.info("📥 Loading initial data...")
+    # Test initial connection
+    logger.info("🔗 Testing Nexus connection...")
+    if nexus_client.test_connection():
+        logger.info("✅ Nexus connection successful")
+    else:
+        logger.warning("⚠️ Nexus connection failed - check configuration")
+    
+    logger.info("📥 Background data refresh started...")
     
     app.run(
         host=Config.HOST,

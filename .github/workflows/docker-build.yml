@@ -49,18 +49,34 @@ jobs:
           type=semver,pattern={{major}}.{{minor}}
           type=semver,pattern={{major}}
           type=raw,value=latest,enable={{is_default_branch}}
+        labels: |
+          org.opencontainers.image.title=Trivy Security Dashboard
+          org.opencontainers.image.description=Flask-based dashboard for visualizing Trivy security scan results from CycloneDX files in Nexus Repository
+          org.opencontainers.image.vendor=Security Team
+          org.opencontainers.image.licenses=MIT
+          org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/main/README.md
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.url=https://github.com/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.created={{date 'YYYY-MM-DD[T]HH:MM:SS[Z]'}}
+          maintainer=Trivy Security Dashboard Team
 
     - name: Build and push Docker image
       id: build
       uses: docker/build-push-action@v5
       with:
         context: .
+        file: ./Dockerfile
         platforms: linux/amd64,linux/arm64
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        build-args: |
+          BUILDTIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+          REVISION=${{ github.sha }}
 
     - name: Image digest
       if: github.event_name != 'pull_request'
