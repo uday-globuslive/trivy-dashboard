@@ -23,11 +23,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     LOG_LEVEL=INFO \
     CACHE_TTL=300 \
     DATA_REFRESH_INTERVAL=600 \
-    NEXUS_TIMEOUT=30 \
-    NEXUS_GROUP_ID=com.example \
-    NEXUS_ARTIFACT_SUFFIX=.sbom \
-    NEXUS_VERSION_PREFIX=1.0.0- \
-    NEXUS_ASSET_EXTENSION=json
+    NEXUS_TIMEOUT=30
 
 # Install system dependencies including curl for health check
 RUN apt-get update && apt-get install -y \

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class NexusClient:
     """Client for interacting with Nexus Repository Manager"""
     
-    def __init__(self, nexus_url, username, password, repository='trivy-sbom'):
+    def __init__(self, nexus_url, username, password, repository):
         self.nexus_url = nexus_url.rstrip('/')
         self.username = username
         self.password = password
@@ -32,7 +32,7 @@ class NexusClient:
             'Content-Type': 'application/json'
         })
         
-        logger.info(f"🔗 Initialized Nexus client for {nexus_url}")
+        logger.info(f"🔗 Initialized Nexus client for {nexus_url} (repository: {repository})")
     
     def test_connection(self):
         """Test connection to Nexus Repository"""

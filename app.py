@@ -34,7 +34,7 @@ app.config.from_object(Config)
 CORS(app)
 
 # Initialize services
-nexus_client = NexusClient(Config.NEXUS_URL, Config.NEXUS_USERNAME, Config.NEXUS_PASSWORD)
+nexus_client = NexusClient(Config.NEXUS_URL, Config.NEXUS_USERNAME, Config.NEXUS_PASSWORD, Config.NEXUS_REPOSITORY)
 parser = CycloneDXParser()
 analytics = SecurityAnalytics()
 cache_manager = CacheManager()
