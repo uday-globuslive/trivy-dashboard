@@ -66,8 +66,8 @@ class NexusClient:
             search_url = f"{self.nexus_url}/service/rest/v1/search/assets"
             params = {
                 'repository': self.repository,
-                'group': Config.NEXUS_GROUP_ID,
-                'extension': Config.NEXUS_ASSET_EXTENSION
+                'group': Config.NEXUS_GROUP_ID
+                # Removed extension filter to see all files first
             }
             
             logger.info(f"🔍 Search URL: {search_url}")

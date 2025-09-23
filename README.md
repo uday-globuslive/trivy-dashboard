@@ -12,10 +12,16 @@ This dashboard provides real-time security insights by:
 
 ## 📊 Features
 
+### 🔍 SBOM Analysis & Enhancement
+- **Automatic SBOM Type Detection**: Identifies component-only vs vulnerability-enhanced SBOMs
+- **Enhancement Recommendations**: Suggests Trivy commands to add vulnerability data
+- **Mixed SBOM Support**: Handles both basic component data and full vulnerability information
+- **Trivy Integration Guide**: Step-by-step instructions for generating enhanced SBOMs
+
 ### Application Level Views
-- **Vulnerability Trends**: Track vulnerabilities over time
+- **Vulnerability Trends**: Track vulnerabilities over time (when vulnerability data available)
 - **Risk Assessment**: Critical, High, Medium, Low severity breakdown
-- **Component Analysis**: Most vulnerable components and licenses
+- **Component Analysis**: Component inventory, dependencies, and licenses
 - **Compliance Reports**: Security posture across all applications
 
 ### Pipeline Level Views
@@ -26,7 +32,7 @@ This dashboard provides real-time security insights by:
 
 ### Multi-Scan Analytics
 - **Cross-Project Comparison**: Security posture across different projects
-- **Dependency Analysis**: Common vulnerable dependencies
+- **Dependency Analysis**: Component and vulnerability analysis
 - **Security Metrics**: KPIs and security score calculations
 - **Alert Dashboard**: Critical issues requiring immediate attention
 

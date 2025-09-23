@@ -4,6 +4,10 @@ Configuration settings for the Trivy Security Dashboard
 
 import os
 from datetime import timedelta
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class Config:
     """Configuration class for the Flask application"""

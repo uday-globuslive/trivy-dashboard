@@ -70,7 +70,13 @@ def refresh_data_background():
                         sbom_content = nexus_client.download_sbom(sbom_file['path'])
                         parsed_data = parser.parse_cyclonedx(sbom_content)
                         
-                        project_name = parsed_data['metadata']['project']
+                        # Use filename-based project name if SBOM metadata project name is not useful
+                        metadata_project_name = parsed_data['metadata']['project']
+                        if metadata_project_name in ['.', 'unknown', '', None]:
+                            project_name = sbom_file['project']  # Use project name from filename
+                        else:
+                            project_name = metadata_project_name
+                            
                         scan_id = f"{project_name}_{sbom_file['build_number']}"
                         
                         # Store project data
@@ -101,13 +107,17 @@ def refresh_data_background():
                         scans[scan_id] = scan_data
                         projects[project_name]['scans'].append(scan_id)
                         
-                        # Update project statistics
+                        # Update project statistics with latest scan only
                         vuln_counts = analytics.count_vulnerabilities_by_severity(parsed_data['vulnerabilities'])
-                        projects[project_name]['critical_count'] += vuln_counts['critical']
-                        projects[project_name]['high_count'] += vuln_counts['high']
-                        projects[project_name]['medium_count'] += vuln_counts['medium']
-                        projects[project_name]['low_count'] += vuln_counts['low']
-                        projects[project_name]['total_vulnerabilities'] += vuln_counts['total']
+                        
+                        # Only update if this is the latest scan for this project
+                        if (not projects[project_name]['last_scan'] or 
+                            sbom_file['timestamp'] > projects[project_name]['last_scan']):
+                            projects[project_name]['critical_count'] = vuln_counts['critical']
+                            projects[project_name]['high_count'] = vuln_counts['high']
+                            projects[project_name]['medium_count'] = vuln_counts['medium']
+                            projects[project_name]['low_count'] = vuln_counts['low']
+                            projects[project_name]['total_vulnerabilities'] = vuln_counts['total']
                         
                         # Update last scan timestamp
                         if (not projects[project_name]['last_scan'] or 
@@ -177,7 +187,8 @@ def debug_nexus():
         'sbom_files': [],
         'error_message': None,
         'api_endpoints': {},
-        'test_results': {}
+        'test_results': {},
+        'sbom_analysis': {}
     }
     
     try:
@@ -249,12 +260,41 @@ def debug_nexus():
             try:
                 sbom_content = nexus_client.download_sbom(test_file['path'])
                 debug_info['download_test']['success'] = True
+                
+                # Analyze SBOM content structure
+                components = sbom_content.get('components', [])
+                vulnerabilities = sbom_content.get('vulnerabilities', [])
+                dependencies = sbom_content.get('dependencies', [])
+                
                 debug_info['download_test']['sample_content'] = {
                     'bomFormat': sbom_content.get('bomFormat', 'unknown'),
                     'specVersion': sbom_content.get('specVersion', 'unknown'),
-                    'component_count': len(sbom_content.get('components', [])),
-                    'vulnerability_count': len(sbom_content.get('vulnerabilities', []))
+                    'component_count': len(components),
+                    'vulnerability_count': len(vulnerabilities),
+                    'dependency_count': len(dependencies),
+                    'has_vulnerabilities': len(vulnerabilities) > 0,
+                    'has_metadata': 'metadata' in sbom_content
                 }
+                
+                # Analyze SBOM type and suggest improvements
+                debug_info['sbom_analysis'] = {
+                    'type': 'vulnerability-enhanced' if vulnerabilities else 'component-only',
+                    'can_show_vulnerabilities': len(vulnerabilities) > 0,
+                    'component_types': list(set(comp.get('type', 'unknown') for comp in components[:10])),
+                    'sample_components': [
+                        {
+                            'name': comp.get('name', 'unknown'),
+                            'version': comp.get('version', 'unknown'),
+                            'type': comp.get('type', 'unknown')
+                        } for comp in components[:5]
+                    ],
+                    'trivy_enhancement_suggestion': {
+                        'needed': len(vulnerabilities) == 0,
+                        'command': f"trivy image --format cyclonedx --output enhanced-sbom.json your-image:tag",
+                        'description': "Generate vulnerability-enhanced SBOM with Trivy for complete security analysis"
+                    } if len(vulnerabilities) == 0 else None
+                }
+                
             except Exception as e:
                 debug_info['download_test']['error'] = str(e)
         
@@ -340,7 +380,7 @@ def project_detail(project_name):
 
 @app.route('/scan/<scan_id>')
 def scan_detail(scan_id):
-    """Individual scan details"""
+    """Individual scan details with pagination"""
     logger.info(f"🔍 Rendering scan detail for: {scan_id}")
     
     if scan_id not in app_data['scans']:
@@ -348,16 +388,53 @@ def scan_detail(scan_id):
     
     scan = app_data['scans'][scan_id]
     
-    # Group vulnerabilities by severity
+    # Get pagination parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+    severity_filter = request.args.get('severity', '').upper()
+    
+    # Filter vulnerabilities by severity if specified
+    vulnerabilities = scan['vulnerabilities']
+    if severity_filter and severity_filter in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']:
+        vulnerabilities = [v for v in vulnerabilities if v.get('severity', '').upper() == severity_filter]
+    
+    # Calculate pagination
+    total_vulns = len(vulnerabilities)
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    paginated_vulns = vulnerabilities[start_idx:end_idx]
+    
+    # Calculate pagination info
+    total_pages = (total_vulns + per_page - 1) // per_page
+    has_prev = page > 1
+    has_next = page < total_pages
+    
+    # Group vulnerabilities by severity (for summary cards)
     vuln_by_severity = analytics.group_vulnerabilities_by_severity(scan['vulnerabilities'])
+    
+    # Calculate risk score for this scan
+    risk_score = analytics.calculate_risk_score(scan['vulnerabilities'])
     
     # Get component analysis
     component_analysis = analytics.analyze_components(scan['components'])
     
+    # Add calculated fields to scan data for template
+    scan_with_calculated = scan.copy()
+    scan_with_calculated['risk_score'] = risk_score
+    scan_with_calculated['vulnerabilities_paginated'] = paginated_vulns
+    
     return render_template('scan.html',
-        scan=scan,
+        scan=scan_with_calculated,
         vulnerabilities_by_severity=vuln_by_severity,
-        component_analysis=component_analysis
+        component_analysis=component_analysis,
+        # Pagination info
+        page=page,
+        per_page=per_page,
+        total_vulns=total_vulns,
+        total_pages=total_pages,
+        has_prev=has_prev,
+        has_next=has_next,
+        severity_filter=severity_filter.lower() if severity_filter else ''
     )
 
 @app.route('/api/dashboard/summary')
@@ -480,6 +557,91 @@ def health_check():
         'nexus_connection': nexus_client.test_connection(),
         'data_available': len(app_data['projects']) > 0
     })
+
+@app.route('/api/sbom-analysis')
+def sbom_analysis():
+    """API endpoint for analyzing SBOM content types and capabilities"""
+    logger.info("📊 SBOM Analysis requested")
+    
+    analysis = {
+        'total_projects': len(app_data['projects']),
+        'projects_with_vulnerabilities': 0,
+        'projects_component_only': 0,
+        'projects_detail': [],
+        'recommendations': [],
+        'trivy_commands': {}
+    }
+    
+    for project_name, project_data in app_data['projects'].items():
+        project_analysis = {
+            'name': project_name,
+            'total_scans': len(project_data.get('scans', [])),
+            'has_vulnerabilities': project_data.get('total_vulnerabilities', 0) > 0,
+            'component_count': project_data.get('component_count', 0),
+            'latest_scan': project_data.get('latest_scan', 'unknown'),
+            'sbom_type': 'vulnerability-enhanced' if project_data.get('total_vulnerabilities', 0) > 0 else 'component-only'
+        }
+        
+        if project_analysis['has_vulnerabilities']:
+            analysis['projects_with_vulnerabilities'] += 1
+        else:
+            analysis['projects_component_only'] += 1
+            
+        analysis['projects_detail'].append(project_analysis)
+    
+    # Generate recommendations based on analysis
+    if analysis['projects_component_only'] > 0:
+        analysis['recommendations'].append({
+            'type': 'vulnerability_scanning',
+            'title': 'Enhance SBOMs with Vulnerability Data',
+            'description': f"You have {analysis['projects_component_only']} projects with component-only SBOMs. Consider generating vulnerability-enhanced SBOMs using Trivy.",
+            'priority': 'high',
+            'action': 'Run Trivy vulnerability scanning on your images/repositories'
+        })
+        
+        # Generate Trivy commands for different scenarios
+        analysis['trivy_commands'] = {
+            'container_image': {
+                'command': 'trivy image --format cyclonedx --output enhanced-sbom.json your-image:tag',
+                'description': 'Scan container image and generate vulnerability-enhanced SBOM'
+            },
+            'filesystem': {
+                'command': 'trivy fs --format cyclonedx --output enhanced-sbom.json /path/to/project',
+                'description': 'Scan filesystem/repository and generate vulnerability-enhanced SBOM'
+            },
+            'repository': {
+                'command': 'trivy repo --format cyclonedx --output enhanced-sbom.json https://github.com/your/repo',
+                'description': 'Scan Git repository and generate vulnerability-enhanced SBOM'
+            },
+            'upload_to_nexus': {
+                'command': 'curl -u user:pass -X PUT "http://nexus:8081/repository/mccamish_sbom/com/mccamish/project.sbom/1.0.0-$(date +%Y%m%d%H%M%S)/project.sbom-1.0.0-$(date +%Y%m%d%H%M%S).json" --upload-file enhanced-sbom.json',
+                'description': 'Upload enhanced SBOM to McCamish Nexus repository'
+            }
+        }
+    
+    if analysis['projects_with_vulnerabilities'] == 0:
+        analysis['recommendations'].append({
+            'type': 'no_vulnerabilities',
+            'title': 'No Vulnerability Data Found',
+            'description': 'None of your SBOM files contain vulnerability information. This dashboard is designed to show security insights from vulnerability-enhanced SBOMs.',
+            'priority': 'critical',
+            'action': 'Generate new SBOMs with Trivy vulnerability scanning enabled'
+        })
+    
+    return jsonify(analysis)
+
+@app.route('/components')
+def component_analysis():
+    """Component analysis view for SBOM files"""
+    logger.info("🧩 Rendering component analysis page")
+    
+    # Calculate summary statistics
+    total_projects = len(app_data['projects'])
+    
+    return render_template('component_analysis.html',
+        total_projects=total_projects,
+        last_updated=format_timestamp(app_data['last_updated']) if app_data['last_updated'] else None
+    )
 
 @app.errorhandler(500)
 def internal_error(error):

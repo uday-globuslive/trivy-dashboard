@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+
+{% block title %}Component Analysis - SBOM Dashboard{% endblock %}
+
+{% block content %}
+<!-- SBOM Type Alert -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div id="sbom-type-alert" class="alert alert-info" role="alert">
+            <h4 class="alert-heading"><i class="fas fa-info-circle"></i> SBOM Analysis</h4>
+            <p class="mb-0">Loading SBOM analysis...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Component Summary Cards -->
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            Total Projects
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_projects }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-cubes fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            Component-Only SBOMs
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="component-only-count">-</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-boxes fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            Vulnerability-Enhanced
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="vuln-enhanced-count">-</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-shield-alt fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            Latest Scan
+                        </div>
+                        <div class="h6 mb-0 font-weight-bold text-gray-800">{{ last_updated or 'Never' }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-clock fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Enhancement Recommendations -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-lightbulb"></i> Enhancement Recommendations
+                </h6>
+            </div>
+            <div class="card-body">
+                <div id="recommendations-content">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="sr-only">Loading recommendations...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Trivy Commands -->
+<div class="row mb-4" id="trivy-commands-section" style="display: none;">
+    <div class="col-12">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-success">
+                    <i class="fas fa-terminal"></i> Trivy Commands for Vulnerability Enhancement
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <h6 class="font-weight-bold text-primary">Container Image Scanning</h6>
+                        <div class="bg-light p-3 rounded">
+                            <code id="trivy-image-cmd">Loading...</code>
+                        </div>
+                        <small class="text-muted mt-2 d-block" id="trivy-image-desc">Loading...</small>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h6 class="font-weight-bold text-primary">Filesystem Scanning</h6>
+                        <div class="bg-light p-3 rounded">
+                            <code id="trivy-fs-cmd">Loading...</code>
+                        </div>
+                        <small class="text-muted mt-2 d-block" id="trivy-fs-desc">Loading...</small>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h6 class="font-weight-bold text-primary">Repository Scanning</h6>
+                        <div class="bg-light p-3 rounded">
+                            <code id="trivy-repo-cmd">Loading...</code>
+                        </div>
+                        <small class="text-muted mt-2 d-block" id="trivy-repo-desc">Loading...</small>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h6 class="font-weight-bold text-primary">Upload to Nexus</h6>
+                        <div class="bg-light p-3 rounded">
+                            <code id="trivy-upload-cmd" style="font-size: 0.8em;">Loading...</code>
+                        </div>
+                        <small class="text-muted mt-2 d-block" id="trivy-upload-desc">Loading...</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Projects Detail Table -->
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-list"></i> Project Details
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="projectsTable" width="100%" cellspacing="0">
+                        <thead>
+                            <tr>
+                                <th>Project Name</th>
+                                <th>SBOM Type</th>
+                                <th>Total Scans</th>
+                                <th>Components</th>
+                                <th>Vulnerabilities</th>
+                                <th>Latest Scan</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="projects-table-body">
+                            <tr>
+                                <td colspan="7" class="text-center">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="sr-only">Loading projects...</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    loadSBOMAnalysis();
+    
+    function loadSBOMAnalysis() {
+        fetch('/api/sbom-analysis')
+            .then(response => response.json())
+            .then(data => {
+                updateSummaryCards(data);
+                updateRecommendations(data);
+                updateTrivyCommands(data);
+                updateProjectsTable(data);
+                updateAlert(data);
+            })
+            .catch(error => {
+                console.error('Error loading SBOM analysis:', error);
+                showError('Failed to load SBOM analysis');
+            });
+    }
+    
+    function updateSummaryCards(data) {
+        $('#component-only-count').text(data.projects_component_only);
+        $('#vuln-enhanced-count').text(data.projects_with_vulnerabilities);
+    }
+    
+    function updateAlert(data) {
+        const alertDiv = $('#sbom-type-alert');
+        if (data.projects_with_vulnerabilities === 0) {
+            alertDiv.removeClass('alert-info').addClass('alert-warning');
+            alertDiv.html(`
+                <h4 class="alert-heading"><i class="fas fa-exclamation-triangle"></i> Component-Only SBOMs Detected</h4>
+                <p>Your SBOM files contain component information but no vulnerability data. This dashboard is designed to show security insights from vulnerability-enhanced SBOMs.</p>
+                <hr>
+                <p class="mb-0"><strong>Recommendation:</strong> Use Trivy to generate vulnerability-enhanced SBOMs for complete security analysis.</p>
+            `);
+        } else if (data.projects_component_only > 0) {
+            alertDiv.removeClass('alert-info').addClass('alert-info');
+            alertDiv.html(`
+                <h4 class="alert-heading"><i class="fas fa-info-circle"></i> Mixed SBOM Types</h4>
+                <p>You have ${data.projects_with_vulnerabilities} projects with vulnerability data and ${data.projects_component_only} with component-only SBOMs.</p>
+                <p class="mb-0">Consider enhancing all SBOMs with vulnerability data for comprehensive security analysis.</p>
+            `);
+        } else {
+            alertDiv.removeClass('alert-warning').addClass('alert-success');
+            alertDiv.html(`
+                <h4 class="alert-heading"><i class="fas fa-check-circle"></i> Vulnerability-Enhanced SBOMs</h4>
+                <p class="mb-0">All your SBOM files contain vulnerability data. Great work on comprehensive security analysis!</p>
+            `);
+        }
+    }
+    
+    function updateRecommendations(data) {
+        const recommendationsDiv = $('#recommendations-content');
+        if (data.recommendations.length === 0) {
+            recommendationsDiv.html('<p class="text-muted">No recommendations at this time.</p>');
+            return;
+        }
+        
+        let html = '';
+        data.recommendations.forEach(rec => {
+            const badgeClass = rec.priority === 'critical' ? 'danger' : rec.priority === 'high' ? 'warning' : 'info';
+            html += `
+                <div class="alert alert-${badgeClass} mb-3">
+                    <h6 class="font-weight-bold">${rec.title}</h6>
+                    <p class="mb-2">${rec.description}</p>
+                    <small><strong>Action:</strong> ${rec.action}</small>
+                </div>
+            `;
+        });
+        recommendationsDiv.html(html);
+    }
+    
+    function updateTrivyCommands(data) {
+        if (data.trivy_commands && Object.keys(data.trivy_commands).length > 0) {
+            $('#trivy-commands-section').show();
+            
+            if (data.trivy_commands.container_image) {
+                $('#trivy-image-cmd').text(data.trivy_commands.container_image.command);
+                $('#trivy-image-desc').text(data.trivy_commands.container_image.description);
+            }
+            
+            if (data.trivy_commands.filesystem) {
+                $('#trivy-fs-cmd').text(data.trivy_commands.filesystem.command);
+                $('#trivy-fs-desc').text(data.trivy_commands.filesystem.description);
+            }
+            
+            if (data.trivy_commands.repository) {
+                $('#trivy-repo-cmd').text(data.trivy_commands.repository.command);
+                $('#trivy-repo-desc').text(data.trivy_commands.repository.description);
+            }
+            
+            if (data.trivy_commands.upload_to_nexus) {
+                $('#trivy-upload-cmd').text(data.trivy_commands.upload_to_nexus.command);
+                $('#trivy-upload-desc').text(data.trivy_commands.upload_to_nexus.description);
+            }
+        }
+    }
+    
+    function updateProjectsTable(data) {
+        const tbody = $('#projects-table-body');
+        let html = '';
+        
+        if (data.projects_detail.length === 0) {
+            html = '<tr><td colspan="7" class="text-center text-muted">No projects found</td></tr>';
+        } else {
+            data.projects_detail.forEach(project => {
+                const typeLabel = project.has_vulnerabilities ? 
+                    '<span class="badge badge-success">Vulnerability-Enhanced</span>' : 
+                    '<span class="badge badge-warning">Component-Only</span>';
+                
+                const actionButton = project.has_vulnerabilities ? 
+                    '<button class="btn btn-sm btn-primary" onclick="viewProject(\'' + project.name + '\')">View Security</button>' :
+                    '<button class="btn btn-sm btn-outline-warning" onclick="showEnhanceGuide(\'' + project.name + '\')">Enhance SBOM</button>';
+                
+                html += `
+                    <tr>
+                        <td><strong>${project.name}</strong></td>
+                        <td>${typeLabel}</td>
+                        <td>${project.total_scans}</td>
+                        <td>${project.component_count}</td>
+                        <td>${project.has_vulnerabilities ? 'Available' : 'Not Available'}</td>
+                        <td>${project.latest_scan}</td>
+                        <td>${actionButton}</td>
+                    </tr>
+                `;
+            });
+        }
+        
+        tbody.html(html);
+    }
+    
+    function showError(message) {
+        $('#sbom-type-alert').removeClass('alert-info').addClass('alert-danger');
+        $('#sbom-type-alert').html(`
+            <h4 class="alert-heading"><i class="fas fa-exclamation-circle"></i> Error</h4>
+            <p class="mb-0">${message}</p>
+        `);
+    }
+});
+
+function viewProject(projectName) {
+    window.location.href = `/project/${projectName}`;
+}
+
+function showEnhanceGuide(projectName) {
+    alert(`To enhance ${projectName} SBOM with vulnerability data:\n\n` +
+          `1. Run Trivy scan on your project\n` +
+          `2. Generate CycloneDX SBOM with vulnerabilities\n` +
+          `3. Upload enhanced SBOM to McCamish Nexus\n\n` +
+          `Check the Trivy Commands section for specific commands.`);
+}
+</script>
+{% endblock %}

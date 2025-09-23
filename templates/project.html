@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block title %}{{ project.name }} - Project Details{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                <li class="breadcrumb-item"><a href="{{ url_for('projects') }}">Projects</a></li>
+                <li class="breadcrumb-item active" aria-current="page">{{ project.name }}</li>
+            </ol>
+        </nav>
+        <h2><i class="fas fa-project-diagram me-2"></i>{{ project.name }}</h2>
+        <p class="text-muted">Security analysis and scan history</p>
+    </div>
+    <div>
+        <button class="btn btn-outline-primary" onclick="refreshData()">
+            <i class="fas fa-refresh me-1"></i>Refresh Data
+        </button>
+    </div>
+</div>
+
+<!-- Security Overview Cards -->
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-danger shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
+                            Critical Vulnerabilities
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ project.critical_count }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            High Vulnerabilities
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ project.high_count }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-exclamation-circle fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            Medium Vulnerabilities
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ project.medium_count }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-info-circle fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            Low Vulnerabilities
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ project.low_count }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-check-circle fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Risk Score and Summary -->
+<div class="row mb-4">
+    <div class="col-xl-8 col-lg-7">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Security Trends</h6>
+            </div>
+            <div class="card-body">
+                <div id="vulnerabilityTrendChart" style="height: 400px;">
+                    <!-- Chart will be populated by JavaScript -->
+                    <div class="text-center py-5">
+                        <i class="fas fa-chart-line fa-2x text-muted mb-3"></i>
+                        <p class="text-muted">Vulnerability trend chart will be displayed here</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-4 col-lg-5">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Risk Assessment</h6>
+            </div>
+            <div class="card-body">
+                <div class="text-center">
+                    <div class="risk-score-circle mb-3">
+                        <div class="risk-score-value" style="color: {{ 'red' if project.risk_score >= 80 else 'orange' if project.risk_score >= 40 else 'green' }}">
+                            {{ project.risk_score }}%
+                        </div>
+                    </div>
+                    <h5>Risk Score</h5>
+                    <p class="text-muted">
+                        {% if project.risk_score >= 80 %}
+                            <span class="badge bg-danger">High Risk</span>
+                        {% elif project.risk_score >= 40 %}
+                            <span class="badge bg-warning">Medium Risk</span>
+                        {% else %}
+                            <span class="badge bg-success">Low Risk</span>
+                        {% endif %}
+                    </p>
+                </div>
+
+                <hr>
+
+                <div class="row text-center">
+                    <div class="col-6">
+                        <div class="font-weight-bold">{{ project.scans|length }}</div>
+                        <small class="text-muted">Total Scans</small>
+                    </div>
+                    <div class="col-6">
+                        <div class="font-weight-bold">{{ project.total_vulnerabilities }}</div>
+                        <small class="text-muted">Total Vulnerabilities</small>
+                    </div>
+                </div>
+
+                <hr>
+
+                <div class="text-center">
+                    <small class="text-muted">
+                        <i class="fas fa-clock me-1"></i>
+                        Last scan: 
+                        {% if project.last_scan %}
+                            {{ project.last_scan.strftime('%Y-%m-%d %H:%M') if project.last_scan else 'Never' }}
+                        {% else %}
+                            Never
+                        {% endif %}
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Scans -->
+<div class="card shadow mb-4">
+    <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary">Recent Scans</h6>
+    </div>
+    <div class="card-body">
+        {% if scans %}
+        <div class="table-responsive">
+            <table class="table table-bordered" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>Scan Date</th>
+                        <th>Build Number</th>
+                        <th>Critical</th>
+                        <th>High</th>
+                        <th>Medium</th>
+                        <th>Low</th>
+                        <th>Total Vulnerabilities</th>
+                        <th>Components</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for scan in scans %}
+                    <tr>
+                        <td>{{ scan.timestamp.strftime('%Y-%m-%d %H:%M') if scan.timestamp else 'Unknown' }}</td>
+                        <td>{{ scan.build_number }}</td>
+                        <td><span class="badge bg-danger">{{ scan.vulnerabilities | selectattr('severity', 'equalto', 'CRITICAL') | list | length }}</span></td>
+                        <td><span class="badge bg-warning">{{ scan.vulnerabilities | selectattr('severity', 'equalto', 'HIGH') | list | length }}</span></td>
+                        <td><span class="badge bg-info">{{ scan.vulnerabilities | selectattr('severity', 'equalto', 'MEDIUM') | list | length }}</span></td>
+                        <td><span class="badge bg-success">{{ scan.vulnerabilities | selectattr('severity', 'equalto', 'LOW') | list | length }}</span></td>
+                        <td>{{ scan.vulnerabilities | length }}</td>
+                        <td>{{ scan.components | length }}</td>
+                        <td>
+                            <a href="{{ url_for('scan_detail', scan_id=scan.id) }}" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-eye"></i> View Details
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4">
+            <i class="fas fa-search fa-2x text-muted mb-3"></i>
+            <h5 class="text-muted">No Scans Available</h5>
+            <p class="text-muted">No security scans have been performed for this project yet.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function refreshData() {
+    // Refresh the page for now - could be enhanced with AJAX
+    window.location.reload();
+}
+
+// Add CSS for risk score circle
+document.addEventListener('DOMContentLoaded', function() {
+    const style = document.createElement('style');
+    style.textContent = `
+        .risk-score-circle {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: 8px solid #e3e6f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+            background: linear-gradient(45deg, #f8f9fc, #ffffff);
+        }
+        .risk-score-value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .project-card {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .project-card:hover {
+            transform: translateY(-2px);
+        }
+    `;
+    document.head.appendChild(style);
+});
+</script>
+{% endblock %}

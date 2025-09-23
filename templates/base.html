@@ -43,6 +43,12 @@
                             <i class="fas fa-folder me-1"></i>Projects
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'component_analysis' %}active{% endif %}" 
+                           href="{{ url_for('component_analysis') }}">
+                            <i class="fas fa-cubes me-1"></i>Components
+                        </a>
+                    </li>
                 </ul>
                 
                 <ul class="navbar-nav">
