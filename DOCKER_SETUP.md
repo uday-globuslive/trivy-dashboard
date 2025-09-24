@@ -68,12 +68,14 @@ Once built, you can use your image:
 # Pull the latest version
 docker pull yourusername/trivy-security-dashboard:latest
 
-# Run the container
+# Run the container with Trivy report configuration
 docker run -d \
   -p 5000:5000 \
   -e NEXUS_URL=http://your-nexus:8081 \
   -e NEXUS_USERNAME=admin \
   -e NEXUS_PASSWORD=password \
+  -e NEXUS_REPOSITORY=your-repository \
+  -e NEXUS_ARTIFACT_SUFFIX=-trivy-report \
   yourusername/trivy-security-dashboard:latest
 ```
 
@@ -94,6 +96,8 @@ services:
       - NEXUS_URL=${NEXUS_URL:-http://localhost:8081}
       - NEXUS_USERNAME=${NEXUS_USERNAME:-admin}
       - NEXUS_PASSWORD=${NEXUS_PASSWORD:-admin123}
+      - NEXUS_REPOSITORY=${NEXUS_REPOSITORY:-trivy-reports}
+      - NEXUS_ARTIFACT_SUFFIX=${NEXUS_ARTIFACT_SUFFIX:--trivy-report}
     restart: unless-stopped
 ```
 

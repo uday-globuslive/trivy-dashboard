@@ -62,6 +62,7 @@ instance/
 .env
 .env.local
 .env.*.local
+!.env.example
 
 # Logs
 logs/
