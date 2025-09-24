@@ -71,7 +71,7 @@ function Get-SbomFiles {
     $sbomFiles = $allFiles | Where-Object {
         $_.assets -and 
         $_.assets[0].path -like "*.$env:NEXUS_ASSET_EXTENSION" -and
-        $_.assets[0].path -notlike "*-trivy-report.*" -and
+        $_.assets[0].path -notlike "*$env:TRIVY_REPORT_SUFFIX.*" -and
         $_.assets[0].path -like "*$env:NEXUS_ARTIFACT_SUFFIX*"
     }
     
@@ -83,7 +83,7 @@ function Get-SbomFiles {
 function Test-TrivyReportExists {
     param($SbomAsset)
     
-    $trivyPath = $SbomAsset.path -replace "\.$env:NEXUS_ASSET_EXTENSION$", "-trivy-report.$env:NEXUS_ASSET_EXTENSION"
+    $trivyPath = $SbomAsset.path -replace "\.$env:NEXUS_ASSET_EXTENSION$", "$env:TRIVY_REPORT_SUFFIX.$env:NEXUS_ASSET_EXTENSION"
     $checkUrl = "$env:NEXUS_URL/repository/$env:NEXUS_REPOSITORY/$trivyPath"
     $headers = Get-AuthHeader
     
@@ -120,7 +120,7 @@ function Convert-SbomFile {
     try {
         # Download SBOM file
         $tempSbom = "$env:TEMP\$filename"
-        $tempTrivy = "$env:TEMP\$baseName-trivy-report.$env:NEXUS_ASSET_EXTENSION"
+        $tempTrivy = "$env:TEMP\$baseName$env:TRIVY_REPORT_SUFFIX.$env:NEXUS_ASSET_EXTENSION"
         
         Write-Log "  Downloading SBOM..."
         $headers = Get-AuthHeader
@@ -137,7 +137,7 @@ function Convert-SbomFile {
         
         # Upload trivy report
         Write-Log "  Uploading Trivy report..."
-        $uploadPath = $asset.path -replace "\.$env:NEXUS_ASSET_EXTENSION$", "-trivy-report.$env:NEXUS_ASSET_EXTENSION"
+        $uploadPath = $asset.path -replace "\.$env:NEXUS_ASSET_EXTENSION$", "$env:TRIVY_REPORT_SUFFIX.$env:NEXUS_ASSET_EXTENSION"
         $uploadUrl = "$env:NEXUS_URL/repository/$env:NEXUS_REPOSITORY/$uploadPath"
         
         Invoke-RestMethod -Uri $uploadUrl -Method PUT -Headers $headers -InFile $tempTrivy -ContentType "application/json"

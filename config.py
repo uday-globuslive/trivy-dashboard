@@ -23,13 +23,13 @@ class Config:
     NEXUS_USERNAME = os.environ.get('NEXUS_USERNAME')
     NEXUS_PASSWORD = os.environ.get('NEXUS_PASSWORD')
     NEXUS_REPOSITORY = os.environ.get('NEXUS_REPOSITORY')
-    NEXUS_TIMEOUT = int(os.environ.get('NEXUS_TIMEOUT', 30))
     
     # Generic Nexus artifact pattern settings - customize for your Jenkins upload pattern
     NEXUS_GROUP_ID = os.environ.get('NEXUS_GROUP_ID', 'com.mccamish')
     NEXUS_ARTIFACT_SUFFIX = os.environ.get('NEXUS_ARTIFACT_SUFFIX', '-trivy-report')
     NEXUS_VERSION_PREFIX = os.environ.get('NEXUS_VERSION_PREFIX', '1.0.0-')
     NEXUS_ASSET_EXTENSION = os.environ.get('NEXUS_ASSET_EXTENSION', 'json')
+    NEXUS_TIMEOUT = int(os.environ.get('NEXUS_TIMEOUT', 30))
     
     # Data refresh settings
     REFRESH_INTERVAL = int(os.environ.get('REFRESH_INTERVAL', 300))  # 5 minutes

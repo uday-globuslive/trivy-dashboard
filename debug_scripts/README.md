@@ -132,6 +132,77 @@ python test_dashboard_fix.py
 - Regression testing
 - Verifying dashboard health
 
+---
+
+### 🔧 **test_config.py**
+**Purpose:** Tests configuration loading and environment variables
+
+**What it does:**
+- Validates .env file configuration
+- Tests Nexus URL and repository settings
+- Verifies authentication parameters
+- Checks configuration consistency
+
+**How to run:**
+```powershell
+cd debug_scripts
+python test_config.py
+```
+
+**Use when:**
+- Configuration issues
+- Environment setup problems
+- Verifying settings after changes
+
+---
+
+### 📋 **test_config_values.py**
+**Purpose:** Displays current configuration values and validates setup
+
+**What it does:**
+- Shows all loaded environment variables
+- Tests configuration parameter validity
+- Checks for missing required settings
+- Validates configuration format
+
+**How to run:**
+```powershell
+cd debug_scripts
+python test_config_values.py
+```
+
+**Use when:**
+- Debugging configuration problems
+- Verifying environment variable loading
+- Checking parameter values
+
+---
+
+### 🖥️ **test_mccamish_config.ps1 / test_mccamish_config.sh**
+**Purpose:** Cross-platform configuration testing scripts
+
+**What it does:**
+- Tests configuration on Windows (PowerShell) and Linux/Mac (Bash)
+- Validates environment variable loading
+- Checks Nexus connectivity from different platforms
+- Verifies cross-platform compatibility
+
+**How to run:**
+```powershell
+# Windows PowerShell
+cd debug_scripts
+.\test_mccamish_config.ps1
+
+# Linux/Mac Bash
+cd debug_scripts
+./test_mccamish_config.sh
+```
+
+**Use when:**
+- Multi-platform deployment testing
+- Environment-specific issues
+- Cross-platform configuration validation
+
 ## Common Debug Scenarios
 
 ### 🚨 **Scenario 1: No projects showing**
