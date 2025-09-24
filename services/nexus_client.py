@@ -1,5 +1,5 @@
 """
-Nexus Repository Client for fetching CycloneDX SBOM files
+Nexus Repository Client for fetching Trivy report files
 """
 
 import requests
@@ -45,18 +45,18 @@ class NexusClient:
             logger.error(f"❌ Nexus connection test failed: {str(e)}")
             return False
     
-    def list_sbom_files(self, limit=1000):
+    def list_trivy_files(self, limit=1000):
         """
-        List all SBOM files (CycloneDX JSON) in the Nexus repository.
+        List all Trivy report files in the Nexus repository.
         
         Handles McCamish Nexus structure:
         - Repository: mccamish_sbom
-        - Path: com/mccamish/{project}.sbom/{version}/{project}.sbom-{version}.json
-        - Example: com/mccamish/AGP_Stellar_SSO.sbom/1.0.0-20250521034211/AGP_Stellar_SSO.sbom-1.0.0-20250521034211.json
+        - Path: com/mccamish/{project}/{version}/{project}-{version}-trivy-report.json
+        - Example: com/mccamish/Mart_Trivy_Scan/1.0.0-20250924044857/Mart_Trivy_Scan-1.0.0-20250924044857-trivy-report.json
         """
         from config import Config
         
-        logger.info(f"📋 Listing SBOM files from repository: {self.repository}")
+        logger.info(f"📋 Listing Trivy report files from repository: {self.repository}")
         logger.info(f"🔍 Searching for: groupId={Config.NEXUS_GROUP_ID}, suffix={Config.NEXUS_ARTIFACT_SUFFIX}, extension={Config.NEXUS_ASSET_EXTENSION}")
         logger.info(f"🌐 Nexus URL: {self.nexus_url}")
         
@@ -104,9 +104,9 @@ class NexusClient:
                             logger.debug(f"⏭️ Skipping checksum file: {asset_path}")
                             continue
                             
-                        # Only process JSON files
-                        if not asset_path.endswith('.json'):
-                            logger.debug(f"⏭️ Skipping non-JSON file: {asset_path}")
+                        # Only process Trivy report JSON files (ending with -trivy-report.json)
+                        if not asset_path.endswith('-trivy-report.json'):
+                            logger.debug(f"⏭️ Skipping non-Trivy-report file: {asset_path}")
                             continue
                         
                         # Parse Maven path structure: com/mccamish/{artifactId}/{version}/{filename}
@@ -117,14 +117,14 @@ class NexusClient:
                             
                         # Extract components from path
                         group_parts = path_parts[:-3]  # ['com', 'mccamish']
-                        artifact_id = path_parts[-3]   # e.g., 'AGP_Stellar_SSO.sbom'
-                        version = path_parts[-2]       # e.g., '1.0.0-20250521034211'
-                        filename = path_parts[-1]      # e.g., 'AGP_Stellar_SSO.sbom-1.0.0-20250521034211.json'
+                        artifact_id = path_parts[-3]   # e.g., 'Mart_Trivy_Scan'
+                        version = path_parts[-2]       # e.g., '1.0.0-20250924044857'
+                        filename = path_parts[-1]      # e.g., 'Mart_Trivy_Scan-1.0.0-20250924044857-trivy-report.json'
                         
                         logger.debug(f"📦 Parsed: artifact={artifact_id}, version={version}, filename={filename}")
                         
-                        # Extract project name by removing suffix
-                        project_name = artifact_id.replace(Config.NEXUS_ARTIFACT_SUFFIX, '') if Config.NEXUS_ARTIFACT_SUFFIX else artifact_id
+                        # For Trivy reports, project name is the artifact_id directly
+                        project_name = artifact_id
                         
                         # Extract build number from version (timestamp part)
                         build_number = self._extract_build_number(version)
@@ -148,7 +148,7 @@ class NexusClient:
                             'asset_path': asset_path
                         }
                         
-                        logger.debug(f"✅ Added SBOM file: {project_name} - {version}")
+                        logger.debug(f"✅ Added Trivy report file: {project_name} - {version}")
                         sbom_files.append(sbom_file)
                         processed_count += 1
                         
@@ -164,39 +164,39 @@ class NexusClient:
                 if not continuation_token:
                     break
             
-            logger.info(f"📦 Found {len(sbom_files)} SBOM files")
+            logger.info(f"📦 Found {len(sbom_files)} Trivy report files")
             
             # Log a few examples for debugging
             if sbom_files:
-                logger.info("📋 Sample SBOM files found:")
+                logger.info("📋 Sample Trivy report files found:")
                 for i, sbom in enumerate(sbom_files[:3]):
                     logger.info(f"  {i+1}. {sbom['project']} - {sbom['version']} - {sbom['path']}")
             
             return sbom_files
             
         except Exception as e:
-            logger.error(f"❌ Error listing SBOM files: {str(e)}")
+            logger.error(f"❌ Error listing Trivy report files: {str(e)}")
             return []
     
-    def download_sbom(self, sbom_path):
+    def download_trivy_report(self, trivy_path):
         """
-        Download SBOM content from Nexus
+        Download Trivy report content from Nexus
         
         Args:
-            sbom_path: Path or URL to the SBOM file
+            trivy_path: Path or URL to the Trivy report file
             
         Returns:
-            dict: Parsed JSON content of the SBOM file
+            dict: Parsed JSON content of the Trivy report file
         """
         try:
-            logger.debug(f"⬇️ Downloading SBOM: {sbom_path}")
+            logger.debug(f"⬇️ Downloading Trivy report: {trivy_path}")
             
             # Handle both full URLs and relative paths
-            if sbom_path.startswith('http'):
-                download_url = sbom_path
+            if trivy_path.startswith('http'):
+                download_url = trivy_path
             else:
                 # Construct proper repository URL for McCamish Nexus
-                download_url = f"{self.nexus_url}/repository/{self.repository}/{sbom_path}"
+                download_url = f"{self.nexus_url}/repository/{self.repository}/{trivy_path}"
             
             logger.debug(f"🌐 Download URL: {download_url}")
             
@@ -204,30 +204,28 @@ class NexusClient:
             response.raise_for_status()
             
             # Parse JSON content
-            sbom_content = response.json()
-            logger.debug(f"✅ Successfully downloaded SBOM ({len(response.content)} bytes)")
+            trivy_content = response.json()
+            logger.debug(f"✅ Successfully downloaded Trivy report ({len(response.content)} bytes)")
             
-            # Log basic SBOM info for debugging
-            if isinstance(sbom_content, dict):
-                logger.debug(f"📋 SBOM type: {sbom_content.get('bomFormat', 'unknown')}")
-                logger.debug(f"📋 SBOM version: {sbom_content.get('specVersion', 'unknown')}")
-                if 'metadata' in sbom_content:
-                    metadata = sbom_content['metadata']
-                    if 'component' in metadata:
-                        comp = metadata['component']
-                        logger.debug(f"📋 Component: {comp.get('name', 'unknown')} v{comp.get('version', 'unknown')}")
+            # Log basic Trivy report info for debugging
+            if isinstance(trivy_content, dict):
+                logger.debug(f"📋 Trivy Schema Version: {trivy_content.get('SchemaVersion', 'unknown')}")
+                logger.debug(f"📋 Artifact Name: {trivy_content.get('ArtifactName', 'unknown')}")
+                logger.debug(f"📋 Artifact Type: {trivy_content.get('ArtifactType', 'unknown')}")
+                results = trivy_content.get('Results', [])
+                logger.debug(f"📋 Results: {len(results)} targets found")
             
-            return sbom_content
+            return trivy_content
             
         except requests.exceptions.HTTPError as e:
-            logger.error(f"❌ HTTP Error downloading SBOM {sbom_path}: {e.response.status_code} - {e.response.text}")
+            logger.error(f"❌ HTTP Error downloading Trivy report {trivy_path}: {e.response.status_code} - {e.response.text}")
             raise
         except Exception as e:
-            logger.error(f"❌ Error downloading SBOM {sbom_path}: {str(e)}")
+            logger.error(f"❌ Error downloading Trivy report {trivy_path}: {str(e)}")
             raise
     
     def get_repository_info(self):
-        """Get information about the SBOM repository"""
+        """Get information about the Trivy report repository"""
         try:
             repo_url = f"{self.nexus_url}/service/rest/v1/repositories/{self.repository}"
             response = self.session.get(repo_url)
@@ -243,8 +241,8 @@ class NexusClient:
             return {}
     
     def search_sbom_by_project(self, project_name):
-        """Search for SBOM files by project name"""
-        logger.info(f"🔍 Searching SBOM files for project: {project_name}")
+        """Search for Trivy report files by project name"""
+        logger.info(f"🔍 Searching Trivy report files for project: {project_name}")
         
         try:
             search_url = f"{self.nexus_url}/service/rest/v1/search"
@@ -270,11 +268,11 @@ class NexusClient:
                         'timestamp': self._parse_timestamp(item.get('lastModified', ''))
                     })
             
-            logger.info(f"📦 Found {len(sbom_files)} SBOM files for project {project_name}")
+            logger.info(f"📦 Found {len(sbom_files)} Trivy report files for project {project_name}")
             return sbom_files
             
         except Exception as e:
-            logger.error(f"❌ Error searching SBOM files for project {project_name}: {str(e)}")
+            logger.error(f"❌ Error searching Trivy report files for project {project_name}: {str(e)}")
             return []
     
     def _extract_build_number(self, version_string):
@@ -332,7 +330,7 @@ class NexusClient:
             return datetime.now()
     
     def get_storage_stats(self):
-        """Get storage statistics for the SBOM repository"""
+        """Get storage statistics for the Trivy report repository"""
         try:
             # Get repository storage stats if available
             stats_url = f"{self.nexus_url}/service/rest/v1/repositories/{self.repository}/status"
@@ -345,11 +343,11 @@ class NexusClient:
                 pass
             
             # Fallback: calculate from search results
-            sbom_files = self.list_sbom_files()
-            total_size = sum(f.get('size', 0) for f in sbom_files)
+            trivy_files = self.list_sbom_files()
+            total_size = sum(f.get('size', 0) for f in trivy_files)
             
             return {
-                'total_files': len(sbom_files),
+                'total_files': len(trivy_files),
                 'total_size_bytes': total_size,
                 'total_size_mb': total_size / (1024 * 1024),
                 'repository': self.repository
