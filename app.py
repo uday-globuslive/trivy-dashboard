@@ -2,7 +2,7 @@
 Trivy Security Dashboard - Main Flask Application
 
 This Flask application provides a comprehensive dashboard for visualizing
-Trivy security scan results from CycloneDX files stored in Nexus Repository.
+Trivy security scan results from native Trivy report JSON files stored in Nexus Repository.
 """
 
 import os
@@ -15,7 +15,7 @@ import time
 
 # Import our custom services
 from services.nexus_client import NexusClient
-from services.cyclonedx_parser import CycloneDXParser
+from services.trivy_parser import TrivyReportParser
 from services.analytics import SecurityAnalytics
 from utils.cache import CacheManager
 from utils.helpers import format_timestamp, calculate_risk_score
@@ -35,7 +35,7 @@ CORS(app)
 
 # Initialize services
 nexus_client = NexusClient(Config.NEXUS_URL, Config.NEXUS_USERNAME, Config.NEXUS_PASSWORD, Config.NEXUS_REPOSITORY)
-parser = CycloneDXParser()
+trivy_parser = TrivyReportParser()
 analytics = SecurityAnalytics()
 cache_manager = CacheManager()
 
@@ -56,28 +56,29 @@ def refresh_data_background():
                 logger.info("🔄 Starting background data refresh...")
                 app_data['is_loading'] = True
                 
-                # Fetch latest SBOM files from Nexus
-                sbom_files = nexus_client.list_sbom_files()
-                logger.info(f"📦 Found {len(sbom_files)} SBOM files in Nexus")
+                # Fetch latest Trivy report files from Nexus
+                trivy_files = nexus_client.list_trivy_files()
+                logger.info(f"📦 Found {len(trivy_files)} Trivy report files in Nexus")
                 
                 projects = {}
                 scans = {}
                 vulnerabilities = {}
                 
-                for sbom_file in sbom_files:
+                for trivy_file in trivy_files:
                     try:
-                        # Download and parse SBOM
-                        sbom_content = nexus_client.download_sbom(sbom_file['path'])
-                        parsed_data = parser.parse_cyclonedx(sbom_content)
+                        # Download and parse Trivy report
+                        trivy_content = nexus_client.download_trivy_report(trivy_file['path'])
                         
-                        # Use filename-based project name if SBOM metadata project name is not useful
-                        metadata_project_name = parsed_data['metadata']['project']
-                        if metadata_project_name in ['.', 'unknown', '', None]:
-                            project_name = sbom_file['project']  # Use project name from filename
-                        else:
-                            project_name = metadata_project_name
+                        # Check if it's a Trivy report (skip if not)
+                        if not trivy_parser.is_trivy_report(trivy_content):
+                            logger.warning(f"⚠️ Skipping non-Trivy report file: {trivy_file['path']}")
+                            continue
                             
-                        scan_id = f"{project_name}_{sbom_file['build_number']}"
+                        parsed_data = trivy_parser.parse_trivy_report(trivy_content)
+                        
+                        # Use project name from Trivy file
+                        project_name = trivy_file['project']
+                        scan_id = f"{project_name}_{trivy_file['build_number']}"
                         
                         # Store project data
                         if project_name not in projects:
@@ -97,8 +98,8 @@ def refresh_data_background():
                         scan_data = {
                             'id': scan_id,
                             'project': project_name,
-                            'build_number': sbom_file['build_number'],
-                            'timestamp': sbom_file['timestamp'],
+                            'build_number': trivy_file['build_number'],
+                            'timestamp': trivy_file['timestamp'],
                             'vulnerabilities': parsed_data['vulnerabilities'],
                             'components': parsed_data['components'],
                             'metadata': parsed_data['metadata']
@@ -112,7 +113,7 @@ def refresh_data_background():
                         
                         # Only update if this is the latest scan for this project
                         if (not projects[project_name]['last_scan'] or 
-                            sbom_file['timestamp'] > projects[project_name]['last_scan']):
+                            trivy_file['timestamp'] > projects[project_name]['last_scan']):
                             projects[project_name]['critical_count'] = vuln_counts['critical']
                             projects[project_name]['high_count'] = vuln_counts['high']
                             projects[project_name]['medium_count'] = vuln_counts['medium']
@@ -121,8 +122,8 @@ def refresh_data_background():
                         
                         # Update last scan timestamp
                         if (not projects[project_name]['last_scan'] or 
-                            sbom_file['timestamp'] > projects[project_name]['last_scan']):
-                            projects[project_name]['last_scan'] = sbom_file['timestamp']
+                            trivy_file['timestamp'] > projects[project_name]['last_scan']):
+                            projects[project_name]['last_scan'] = trivy_file['timestamp']
                         
                         # Store individual vulnerabilities
                         for vuln in parsed_data['vulnerabilities']:
@@ -136,7 +137,7 @@ def refresh_data_background():
                             })
                         
                     except Exception as e:
-                        logger.error(f"❌ Error processing SBOM file {sbom_file['path']}: {str(e)}")
+                        logger.error(f"❌ Error processing Trivy report file {trivy_file['path']}: {str(e)}")
                         continue
                 
                 # Calculate risk scores for projects
@@ -170,8 +171,8 @@ refresh_thread.start()
 
 @app.route('/debug/nexus')
 def debug_nexus():
-    """Debug endpoint to inspect Nexus connection and SBOM discovery"""
-    logger.info("🔧 Debug: Nexus connection and SBOM discovery")
+    """Debug endpoint to inspect Nexus connection and Trivy report discovery"""
+    logger.info("🔧 Debug: Nexus connection and Trivy report discovery")
     
     debug_info = {
         'nexus_config': {
@@ -184,11 +185,11 @@ def debug_nexus():
             'asset_extension': Config.NEXUS_ASSET_EXTENSION
         },
         'connection_test': False,
-        'sbom_files': [],
+        'trivy_files': [],
         'error_message': None,
         'api_endpoints': {},
         'test_results': {},
-        'sbom_analysis': {}
+        'trivy_analysis': {}
     }
     
     try:
@@ -222,16 +223,16 @@ def debug_nexus():
                     'error': str(e)
                 }
         
-        # Try to list SBOM files with detailed logging
-        logger.info("🔍 Attempting to list SBOM files...")
-        sbom_files = nexus_client.list_sbom_files(limit=10)
-        debug_info['sbom_files'] = sbom_files
-        debug_info['files_found'] = len(sbom_files)
+        # Try to list Trivy report files with detailed logging
+        logger.info("🔍 Attempting to list Trivy report files...")
+        trivy_files = nexus_client.list_trivy_files(limit=10)
+        debug_info['trivy_files'] = trivy_files
+        debug_info['files_found'] = len(trivy_files)
         
         # Test specific McCamish patterns
         debug_info['mccamish_patterns'] = {
-            'expected_path_pattern': f"com/mccamish/{{project}}.sbom/{{version}}/{{project}}.sbom-{{version}}.json",
-            'example_path': "com/mccamish/AGP_Stellar_SSO.sbom/1.0.0-20250521034211/AGP_Stellar_SSO.sbom-1.0.0-20250521034211.json",
+            'expected_path_pattern': f"com/mccamish/{{project}}-trivy-report/{{version}}/{{project}}-trivy-report-{{version}}.json",
+            'example_path': "com/mccamish/AGP_Stellar_SSO-trivy-report/1.0.0-20250521034211/AGP_Stellar_SSO-trivy-report-1.0.0-20250521034211.json",
             'search_params': {
                 'repository': Config.NEXUS_REPOSITORY,
                 'group': Config.NEXUS_GROUP_ID,
@@ -247,8 +248,8 @@ def debug_nexus():
             debug_info['repository_info'] = {'error': str(e)}
         
         # If we found files, try to download one as a test
-        if sbom_files:
-            test_file = sbom_files[0]
+        if trivy_files:
+            test_file = trivy_files[0]
             debug_info['download_test'] = {
                 'test_file': test_file['filename'],
                 'download_url': test_file['path'],
@@ -258,41 +259,40 @@ def debug_nexus():
             }
             
             try:
-                sbom_content = nexus_client.download_sbom(test_file['path'])
+                trivy_content = nexus_client.download_trivy_report(test_file['path'])
                 debug_info['download_test']['success'] = True
                 
-                # Analyze SBOM content structure
-                components = sbom_content.get('components', [])
-                vulnerabilities = sbom_content.get('vulnerabilities', [])
-                dependencies = sbom_content.get('dependencies', [])
+                # Analyze Trivy report content structure
+                results = trivy_content.get('Results', [])
+                schema_version = trivy_content.get('SchemaVersion', 'unknown')
+                
+                # Count total vulnerabilities across all results
+                total_vulns = sum(len(result.get('Vulnerabilities', [])) for result in results)
                 
                 debug_info['download_test']['sample_content'] = {
-                    'bomFormat': sbom_content.get('bomFormat', 'unknown'),
-                    'specVersion': sbom_content.get('specVersion', 'unknown'),
-                    'component_count': len(components),
-                    'vulnerability_count': len(vulnerabilities),
-                    'dependency_count': len(dependencies),
-                    'has_vulnerabilities': len(vulnerabilities) > 0,
-                    'has_metadata': 'metadata' in sbom_content
+                    'schemaVersion': schema_version,
+                    'results_count': len(results),
+                    'total_vulnerabilities': total_vulns,
+                    'has_vulnerabilities': total_vulns > 0,
+                    'has_metadata': 'Metadata' in trivy_content
                 }
                 
-                # Analyze SBOM type and suggest improvements
-                debug_info['sbom_analysis'] = {
-                    'type': 'vulnerability-enhanced' if vulnerabilities else 'component-only',
-                    'can_show_vulnerabilities': len(vulnerabilities) > 0,
-                    'component_types': list(set(comp.get('type', 'unknown') for comp in components[:10])),
-                    'sample_components': [
+                # Analyze Trivy report and provide insights
+                debug_info['trivy_analysis'] = {
+                    'type': 'native-trivy-report',
+                    'can_show_vulnerabilities': total_vulns > 0,
+                    'results_summary': [
                         {
-                            'name': comp.get('name', 'unknown'),
-                            'version': comp.get('version', 'unknown'),
-                            'type': comp.get('type', 'unknown')
-                        } for comp in components[:5]
+                            'target': result.get('Target', 'unknown'),
+                            'type': result.get('Type', 'unknown'),
+                            'vulnerability_count': len(result.get('Vulnerabilities', []))
+                        } for result in results[:5]
                     ],
-                    'trivy_enhancement_suggestion': {
-                        'needed': len(vulnerabilities) == 0,
-                        'command': f"trivy image --format cyclonedx --output enhanced-sbom.json your-image:tag",
-                        'description': "Generate vulnerability-enhanced SBOM with Trivy for complete security analysis"
-                    } if len(vulnerabilities) == 0 else None
+                    'format_info': {
+                        'format': 'Native Trivy JSON',
+                        'schema_version': schema_version,
+                        'description': "Direct Trivy scan results in native JSON format"
+                    }
                 }
                 
             except Exception as e:

@@ -1,0 +1,17 @@
+# Ignore Trivy installation directory
+trivy/
+
+# Ignore any temporary files
+*.tmp
+*.temp
+
+# Ignore log files
+*.log
+
+# Ignore any downloaded SBOM files
+*.sbom.json
+*-trivy-report.json
+
+# Ignore backup files
+*.bak
+*.backup

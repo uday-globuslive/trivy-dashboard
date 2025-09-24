@@ -27,7 +27,7 @@ class Config:
     
     # Generic Nexus artifact pattern settings - customize for your Jenkins upload pattern
     NEXUS_GROUP_ID = os.environ.get('NEXUS_GROUP_ID', 'com.mccamish')
-    NEXUS_ARTIFACT_SUFFIX = os.environ.get('NEXUS_ARTIFACT_SUFFIX', '.sbom')
+    NEXUS_ARTIFACT_SUFFIX = os.environ.get('NEXUS_ARTIFACT_SUFFIX', '-trivy-report')
     NEXUS_VERSION_PREFIX = os.environ.get('NEXUS_VERSION_PREFIX', '1.0.0-')
     NEXUS_ASSET_EXTENSION = os.environ.get('NEXUS_ASSET_EXTENSION', 'json')
     
