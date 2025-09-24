@@ -4,7 +4,7 @@ FROM python:3.11-slim
 # Add metadata labels
 LABEL maintainer="Trivy Security Dashboard" \
       org.opencontainers.image.title="Trivy Security Dashboard" \
-      org.opencontainers.image.description="Flask-based dashboard for visualizing Trivy security scan results from CycloneDX files in Nexus Repository" \
+      org.opencontainers.image.description="Flask-based dashboard for visualizing Trivy security scan results from native Trivy JSON reports in Nexus Repository" \
       org.opencontainers.image.vendor="Security Team" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.url="https://github.com/yourusername/trivy-security-dashboard" \
