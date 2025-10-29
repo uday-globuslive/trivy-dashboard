@@ -51,6 +51,7 @@ NEXUS_REPOSITORY=mccamish_sbom
 NEXUS_GROUP_ID=com.mccamish
 NEXUS_ASSET_EXTENSION=json
 NEXUS_ARTIFACT_SUFFIX=.sbom
+TRIVY_REPORT_SUFFIX=-trivy-report
 ```
 
 **No manual configuration needed** - the utilities use your existing setup!

@@ -44,6 +44,19 @@ function Get-AuthHeader {
     return @{ Authorization = "Basic $auth" }
 }
 
+# Get Nexus version info
+function Get-NexusVersion {
+    try {
+        $versionUrl = "$env:NEXUS_URL/service/rest/v1/status"
+        $headers = Get-AuthHeader
+        $response = Invoke-RestMethod -Uri $versionUrl -Headers $headers -Method GET
+        return $response.version
+    } catch {
+        Write-Log "Could not retrieve Nexus version: $($_.Exception.Message)" "WARN"
+        return "Unknown"
+    }
+}
+
 # Get list of SBOM files from Nexus
 function Get-SbomFiles {
     Write-Log "Fetching SBOM files from Nexus repository: $env:NEXUS_REPOSITORY"
@@ -95,6 +108,57 @@ function Test-TrivyReportExists {
     }
 }
 
+# Generate checksums manually if Nexus doesn't create them
+function New-ChecksumFiles {
+    param($FilePath, $UploadUrl, $Headers)
+    
+    Write-Log "  Generating and uploading checksum files..."
+    
+    try {
+        $fileBytes = [System.IO.File]::ReadAllBytes($FilePath)
+        
+        # Generate checksums
+        $md5 = [System.Security.Cryptography.MD5]::Create()
+        $sha1 = [System.Security.Cryptography.SHA1]::Create()
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        $sha512 = [System.Security.Cryptography.SHA512]::Create()
+        
+        $md5Hash = [System.BitConverter]::ToString($md5.ComputeHash($fileBytes)).Replace("-", "").ToLower()
+        $sha1Hash = [System.BitConverter]::ToString($sha1.ComputeHash($fileBytes)).Replace("-", "").ToLower()
+        $sha256Hash = [System.BitConverter]::ToString($sha256.ComputeHash($fileBytes)).Replace("-", "").ToLower()
+        $sha512Hash = [System.BitConverter]::ToString($sha512.ComputeHash($fileBytes)).Replace("-", "").ToLower()
+        
+        # Upload checksum files
+        $checksums = @{
+            ".md5" = $md5Hash
+            ".sha1" = $sha1Hash
+            ".sha256" = $sha256Hash
+            ".sha512" = $sha512Hash
+        }
+        
+        foreach ($ext in $checksums.Keys) {
+            $checksumUrl = "$UploadUrl$ext"
+            $checksumContent = $checksums[$ext]
+            
+            try {
+                Invoke-RestMethod -Uri $checksumUrl -Method PUT -Headers $Headers -Body $checksumContent -ContentType "text/plain"
+                Write-Log "    Uploaded $ext checksum" "SUCCESS"
+            } catch {
+                Write-Log "    Failed to upload $ext checksum: $($_.Exception.Message)" "WARN"
+            }
+        }
+        
+        # Cleanup
+        $md5.Dispose()
+        $sha1.Dispose() 
+        $sha256.Dispose()
+        $sha512.Dispose()
+        
+    } catch {
+        Write-Log "  Error generating checksums: $($_.Exception.Message)" "ERROR"
+    }
+}
+
 # Convert single SBOM file
 function Convert-SbomFile {
     param($Component)
@@ -135,12 +199,25 @@ function Convert-SbomFile {
             throw "Trivy conversion failed with exit code $LASTEXITCODE"
         }
         
-        # Upload trivy report
+        # Upload trivy report using original PUT method
         Write-Log "  Uploading Trivy report..."
         $uploadPath = $asset.path -replace "\.$env:NEXUS_ASSET_EXTENSION$", "$env:TRIVY_REPORT_SUFFIX.$env:NEXUS_ASSET_EXTENSION"
         $uploadUrl = "$env:NEXUS_URL/repository/$env:NEXUS_REPOSITORY/$uploadPath"
         
+        # Upload the main file
         Invoke-RestMethod -Uri $uploadUrl -Method PUT -Headers $headers -InFile $tempTrivy -ContentType "application/json"
+        
+        # Check if checksums were created automatically, if not create them manually
+        Start-Sleep -Seconds 2  # Give Nexus time to generate checksums
+        
+        $md5CheckUrl = "$uploadUrl.md5"
+        try {
+            Invoke-RestMethod -Uri $md5CheckUrl -Method HEAD -Headers $headers | Out-Null
+            Write-Log "  Checksums generated automatically by Nexus" "SUCCESS"
+        } catch {
+            Write-Log "  Checksums not generated automatically, creating manually..." "WARN"
+            New-ChecksumFiles -FilePath $tempTrivy -UploadUrl $uploadUrl -Headers $headers
+        }
         
         # Cleanup
         Remove-Item $tempSbom -ErrorAction SilentlyContinue
@@ -165,6 +242,10 @@ function Main {
     
     # Load environment
     Import-EnvFile
+    
+    # Check Nexus version
+    $nexusVersion = Get-NexusVersion
+    Write-Log "Nexus Version: $nexusVersion"
     
     # Validate Trivy
     if (-not (Test-Path ".\trivy\trivy.exe")) {
