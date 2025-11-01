@@ -437,6 +437,31 @@ def scan_detail(scan_id):
         severity_filter=severity_filter.lower() if severity_filter else ''
     )
 
+@app.route('/scan/<scan_id>/vulnerability/<vuln_id>')
+def vulnerability_detail(scan_id, vuln_id):
+    """Individual vulnerability details with SBOM information from Trivy report"""
+    logger.info(f"🔍 Rendering vulnerability detail for: {vuln_id} in scan: {scan_id}")
+    
+    if scan_id not in app_data['scans']:
+        return "Scan not found", 404
+    
+    scan = app_data['scans'][scan_id]
+    
+    # Find the vulnerability
+    vulnerability = None
+    for vuln in scan['vulnerabilities']:
+        if vuln.get('id') == vuln_id:
+            vulnerability = vuln
+            break
+    
+    if not vulnerability:
+        return "Vulnerability not found", 404
+    
+    return render_template('vulnerability_details.html',
+        scan=scan,
+        vulnerability=vulnerability
+    )
+
 @app.route('/api/dashboard/summary')
 def api_dashboard_summary():
     """API endpoint for dashboard summary data"""
