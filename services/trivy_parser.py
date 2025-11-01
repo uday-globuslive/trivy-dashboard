@@ -180,6 +180,7 @@ class TrivyReportParser:
                     parsed_vuln = {
                         'bom_ref': f"{target}#{vuln_id}",
                         'id': vuln_id,
+                        'title': vuln.get('Title', ''),
                         'source': {
                             'name': vuln.get('DataSource', {}).get('Name', ''),
                             'url': vuln.get('DataSource', {}).get('URL', '')
@@ -206,7 +207,10 @@ class TrivyReportParser:
                             'installed_version': vuln.get('InstalledVersion', ''),
                             'fixed_version': vuln.get('FixedVersion', ''),
                             'package_path': vuln.get('PkgPath', ''),
-                            'layer_digest': vuln.get('Layer', {}).get('Digest', '') if vuln.get('Layer') else ''
+                            'layer_digest': vuln.get('Layer', {}).get('Digest', '') if vuln.get('Layer') else '',
+                            'purl': vuln.get('PkgIdentifier', {}).get('PURL', ''),
+                            'severity_source': vuln.get('SeveritySource', ''),
+                            'primary_url': vuln.get('PrimaryURL', '')
                         },
                         
                         # Calculated fields
