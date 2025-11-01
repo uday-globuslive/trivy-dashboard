@@ -17,6 +17,7 @@ import time
 from services.nexus_client import NexusClient
 from services.trivy_parser import TrivyReportParser
 from services.analytics import SecurityAnalytics
+from services.hybrid_sbom_parser import HybridSBOMParser
 from utils.cache import CacheManager
 from utils.helpers import format_timestamp, calculate_risk_score
 from config import Config
@@ -457,6 +458,46 @@ def vulnerability_detail(scan_id, vuln_id):
     if not vulnerability:
         return "Vulnerability not found", 404
     
+    # Try to enrich with merged SBOM data (license + copyright info from CycloneDX)
+    try:
+        project = scan.get('project')
+        build_number = scan.get('build_number')
+        
+        if project and build_number:
+            # Fetch both Trivy and CycloneDX data
+            trivy_content = nexus_client.download_trivy_report(
+                f"com/mccamish/{project}-trivy-report/{build_number}/{project}-trivy-report-{build_number}.json"
+            )
+            
+            # Try to fetch CycloneDX if available
+            cyclonedx_content = None
+            try:
+                cyclonedx_content = nexus_client.download_cyclonedx_sbom(project, build_number)
+            except:
+                logger.debug(f"CycloneDX SBOM not found for {project}-{build_number}")
+            
+            if trivy_content and cyclonedx_content:
+                # Merge data sources
+                hybrid_parser = HybridSBOMParser(trivy_content, cyclonedx_content)
+                
+                # Get component info with license
+                pkg_name = vulnerability.get('properties', {}).get('package_name')
+                version = vulnerability.get('properties', {}).get('installed_version')
+                
+                if pkg_name and version:
+                    component_info = hybrid_parser.get_component_sbom(pkg_name, version)
+                    
+                    if component_info:
+                        vulnerability['license_info'] = {
+                            'concluded': component_info.get('licenseConcluded'),
+                            'declared': component_info.get('licenseDeclared'),
+                            'comments': component_info.get('licenseComments'),
+                            'copyright': component_info.get('copyrightText'),
+                            'supplier': component_info.get('supplier'),
+                        }
+    except Exception as e:
+        logger.debug(f"Could not enrich vulnerability with merged SBOM data: {str(e)}")
+    
     return render_template('vulnerability_details.html',
         scan=scan,
         vulnerability=vulnerability
@@ -654,6 +695,55 @@ def sbom_analysis():
         })
     
     return jsonify(analysis)
+
+@app.route('/scan/<scan_id>/sbom/export')
+def export_merged_sbom(scan_id):
+    """Export merged SBOM (Trivy + CycloneDX) as SPDX JSON"""
+    logger.info(f"📤 Export merged SBOM for scan: {scan_id}")
+    
+    if scan_id not in app_data['scans']:
+        return jsonify({'error': 'Scan not found'}), 404
+    
+    scan = app_data['scans'][scan_id]
+    project = scan.get('project')
+    build_number = scan.get('build_number')
+    
+    if not project or not build_number:
+        return jsonify({'error': 'Scan metadata incomplete'}), 400
+    
+    try:
+        # Fetch Trivy data
+        trivy_content = nexus_client.download_trivy_report(
+            f"com/mccamish/{project}-trivy-report/{build_number}/{project}-trivy-report-{build_number}.json"
+        )
+        
+        # Try to fetch CycloneDX
+        cyclonedx_content = None
+        try:
+            cyclonedx_content = nexus_client.download_cyclonedx_sbom(project, build_number)
+        except:
+            logger.debug(f"CycloneDX not available for {project}-{build_number}")
+        
+        # Merge if both available
+        if trivy_content and cyclonedx_content:
+            hybrid_parser = HybridSBOMParser(trivy_content, cyclonedx_content)
+            spdx_output = hybrid_parser.to_spdx_json()
+            filename = f"{project}-{build_number}-merged-sbom.spdx.json"
+        else:
+            # Return Trivy if CycloneDX not available
+            import json
+            spdx_output = json.dumps(trivy_content, indent=2)
+            filename = f"{project}-{build_number}-trivy-report.json"
+        
+        return Response(
+            spdx_output,
+            mimetype='application/json',
+            headers={'Content-Disposition': f'attachment; filename={filename}'}
+        )
+    
+    except Exception as e:
+        logger.error(f"Error exporting merged SBOM: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/components')
 def component_analysis():
