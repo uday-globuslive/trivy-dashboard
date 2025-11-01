@@ -101,6 +101,7 @@ def refresh_data_background():
                             'project': project_name,
                             'build_number': trivy_file['build_number'],
                             'timestamp': trivy_file['timestamp'],
+                            'trivy_report_path': trivy_file['path'],
                             'vulnerabilities': parsed_data['vulnerabilities'],
                             'components': parsed_data['components'],
                             'metadata': parsed_data['metadata']
@@ -460,24 +461,26 @@ def vulnerability_detail(scan_id, vuln_id):
     
     # Try to enrich with merged SBOM data (license + copyright info from CycloneDX)
     try:
-        project = scan.get('project')
-        build_number = scan.get('build_number')
+        # Get the Trivy report path from scan metadata
+        trivy_report_path = scan.get('trivy_report_path')
         
-        if project and build_number:
-            # Fetch both Trivy and CycloneDX data
-            trivy_content = nexus_client.download_trivy_report(
-                f"com/mccamish/{project}-trivy-report/{build_number}/{project}-trivy-report-{build_number}.json"
-            )
+        if trivy_report_path:
+            logger.debug(f"Loading Trivy data from: {trivy_report_path}")
             
-            # Try to fetch CycloneDX if available
+            # Fetch Trivy data
+            trivy_content = nexus_client.download_trivy_report(trivy_report_path)
+            
+            # Try to fetch CycloneDX if available (same path, without -trivy-report suffix)
             cyclonedx_content = None
             try:
-                cyclonedx_content = nexus_client.download_cyclonedx_sbom(project, build_number)
-            except:
-                logger.debug(f"CycloneDX SBOM not found for {project}-{build_number}")
+                logger.debug(f"Attempting to load CycloneDX SBOM from same folder...")
+                cyclonedx_content = nexus_client.download_cyclonedx_sbom(trivy_report_path)
+            except Exception as e:
+                logger.debug(f"CycloneDX SBOM not found or error: {str(e)}")
             
             if trivy_content and cyclonedx_content:
                 # Merge data sources
+                logger.debug(f"Merging Trivy + CycloneDX data for vulnerability enrichment")
                 hybrid_parser = HybridSBOMParser(trivy_content, cyclonedx_content)
                 
                 # Get component info with license
@@ -488,6 +491,7 @@ def vulnerability_detail(scan_id, vuln_id):
                     component_info = hybrid_parser.get_component_sbom(pkg_name, version)
                     
                     if component_info:
+                        logger.debug(f"Found component info for {pkg_name}:{version}")
                         vulnerability['license_info'] = {
                             'concluded': component_info.get('licenseConcluded'),
                             'declared': component_info.get('licenseDeclared'),
@@ -705,35 +709,35 @@ def export_merged_sbom(scan_id):
         return jsonify({'error': 'Scan not found'}), 404
     
     scan = app_data['scans'][scan_id]
-    project = scan.get('project')
-    build_number = scan.get('build_number')
+    trivy_report_path = scan.get('trivy_report_path')
     
-    if not project or not build_number:
-        return jsonify({'error': 'Scan metadata incomplete'}), 400
+    if not trivy_report_path:
+        return jsonify({'error': 'Trivy report path not found in scan metadata'}), 400
     
     try:
         # Fetch Trivy data
-        trivy_content = nexus_client.download_trivy_report(
-            f"com/mccamish/{project}-trivy-report/{build_number}/{project}-trivy-report-{build_number}.json"
-        )
+        logger.debug(f"Fetching Trivy data from: {trivy_report_path}")
+        trivy_content = nexus_client.download_trivy_report(trivy_report_path)
         
-        # Try to fetch CycloneDX
+        # Try to fetch CycloneDX from same path (without -trivy-report suffix)
         cyclonedx_content = None
         try:
-            cyclonedx_content = nexus_client.download_cyclonedx_sbom(project, build_number)
-        except:
-            logger.debug(f"CycloneDX not available for {project}-{build_number}")
+            logger.debug(f"Attempting to fetch CycloneDX SBOM...")
+            cyclonedx_content = nexus_client.download_cyclonedx_sbom(trivy_report_path)
+        except Exception as e:
+            logger.debug(f"CycloneDX not available: {str(e)}")
         
         # Merge if both available
         if trivy_content and cyclonedx_content:
+            logger.info(f"Merging Trivy + CycloneDX data for export")
             hybrid_parser = HybridSBOMParser(trivy_content, cyclonedx_content)
             spdx_output = hybrid_parser.to_spdx_json()
-            filename = f"{project}-{build_number}-merged-sbom.spdx.json"
+            filename = f"{scan['project']}-{scan['build_number']}-merged-sbom.spdx.json"
         else:
             # Return Trivy if CycloneDX not available
             import json
             spdx_output = json.dumps(trivy_content, indent=2)
-            filename = f"{project}-{build_number}-trivy-report.json"
+            filename = f"{scan['project']}-{scan['build_number']}-trivy-report.json"
         
         return Response(
             spdx_output,

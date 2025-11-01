@@ -224,6 +224,62 @@ class NexusClient:
             logger.error(f"❌ Error downloading Trivy report {trivy_path}: {str(e)}")
             raise
     
+    def download_cyclonedx_sbom(self, trivy_path):
+        """
+        Download CycloneDX SBOM file from Nexus
+        
+        Assumes CycloneDX file is in same folder as Trivy report but without the "-trivy-report" suffix
+        
+        Example:
+            Trivy: com/mccamish/projectname.sbom-version/projectname.sbom-version-trivy-report.json
+            SBOM:  com/mccamish/projectname.sbom-version/projectname.sbom-version.json
+        
+        Args:
+            trivy_path: Path to Trivy report file (will derive CycloneDX path)
+            
+        Returns:
+            dict: Parsed JSON content of the CycloneDX SBOM
+            
+        Raises:
+            Exception: If file not found or download fails
+        """
+        try:
+            logger.debug(f"⬇️ Downloading CycloneDX SBOM based on Trivy path: {trivy_path}")
+            
+            # Remove "-trivy-report" from the path to get CycloneDX path
+            # Example: path/projectname.sbom-version-trivy-report.json
+            #       -> path/projectname.sbom-version.json
+            cyclonedx_path = trivy_path.replace('-trivy-report.json', '.json')
+            
+            # If the path didn't contain -trivy-report, try other patterns
+            if cyclonedx_path == trivy_path:
+                # Fallback: try replacing -trivy-report part anywhere
+                cyclonedx_path = trivy_path.replace('-trivy-report', '')
+            
+            logger.debug(f"🔍 CycloneDX path derived: {cyclonedx_path}")
+            
+            # Construct full URL
+            download_url = f"{self.nexus_url}/repository/{self.repository}/{cyclonedx_path}"
+            logger.debug(f"🌐 Downloading CycloneDX from: {download_url}")
+            
+            response = self.session.get(download_url, timeout=30)
+            response.raise_for_status()
+            
+            cyclonedx_content = response.json()
+            logger.info(f"✅ Successfully downloaded CycloneDX SBOM from {cyclonedx_path}")
+            return cyclonedx_content
+            
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                logger.debug(f"⚠️ CycloneDX SBOM not found at: {cyclonedx_path}")
+                raise FileNotFoundError(f"CycloneDX SBOM not found: {cyclonedx_path}")
+            else:
+                logger.error(f"❌ HTTP Error downloading CycloneDX SBOM: {e.response.status_code}")
+                raise
+        except Exception as e:
+            logger.error(f"❌ Error downloading CycloneDX SBOM: {str(e)}")
+            raise
+    
     def get_repository_info(self):
         """Get information about the Trivy report repository"""
         try:
