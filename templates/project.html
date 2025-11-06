@@ -184,6 +184,7 @@
                     <tr>
                         <th>Scan Date</th>
                         <th>Build Number</th>
+                        <th>Branch Name</th>
                         <th>Critical</th>
                         <th>High</th>
                         <th>Medium</th>
@@ -198,6 +199,13 @@
                     <tr>
                         <td>{{ scan.timestamp.strftime('%Y-%m-%d %H:%M') if scan.timestamp else 'Unknown' }}</td>
                         <td>{{ scan.build_number }}</td>
+                        <td>
+                            {% if scan.branch_name and scan.branch_name != 'not provided' %}
+                                <span class="badge bg-info">{{ scan.branch_name }}</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Branch: not provided</span>
+                            {% endif %}
+                        </td>
                         <td><span class="badge bg-danger">{{ scan.vulnerabilities | selectattr('severity', 'equalto', 'CRITICAL') | list | length }}</span></td>
                         <td><span class="badge bg-warning">{{ scan.vulnerabilities | selectattr('severity', 'equalto', 'HIGH') | list | length }}</span></td>
                         <td><span class="badge bg-info">{{ scan.vulnerabilities | selectattr('severity', 'equalto', 'MEDIUM') | list | length }}</span></td>

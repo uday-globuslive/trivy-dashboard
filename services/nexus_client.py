@@ -129,6 +129,10 @@ class NexusClient:
                         # Extract build number from version (timestamp part)
                         build_number = self._extract_build_number(version)
                         
+                        # Extract branch name from version (part after the timestamp)
+                        branch_name = self._extract_branch_name(version)
+                        logger.info(f"🌿 Extracted branch name: '{branch_name}' from version: {version}")
+                        
                         # Get timestamp from Nexus metadata
                         timestamp = self._parse_timestamp(asset.get('lastModified', ''))
                         
@@ -139,6 +143,7 @@ class NexusClient:
                             'path': final_download_url,
                             'project': project_name,
                             'build_number': build_number,
+                            'branch_name': branch_name,
                             'timestamp': timestamp,
                             'size': asset.get('fileSize', 0),
                             'group_id': '/'.join(group_parts),  # 'com/mccamish'
@@ -361,6 +366,32 @@ class NexusClient:
             
         except Exception:
             return 1
+    
+    def _extract_branch_name(self, version_string):
+        """Extract branch name from version string
+        
+        Format: {version}-{timestamp} or {version}-{timestamp}-{branchname}
+        Examples:
+        - 1.0.0-20251106105615 -> 'not provided' (no branch name)
+        - 1.0.0-20251106182437-multitenant-main -> 'multitenant-main'
+        """
+        try:
+            # Look for pattern: -{8+ digits}-{anything}
+            # This matches -{timestamp}-{branchname}
+            match = re.search(r'-(\d{8,})-(.+)$', version_string)
+            if match:
+                branch_name = match.group(2)
+                if branch_name:
+                    logger.info(f"🌿 Branch name found: '{branch_name}' from version: {version_string}")
+                    return branch_name
+            
+            # No branch name found
+            logger.info(f"🌿 No branch name in version: {version_string}")
+            return 'not provided'
+            
+        except Exception as e:
+            logger.warning(f"Error extracting branch name from {version_string}: {str(e)}")
+            return 'not provided'
     
     def _parse_timestamp(self, timestamp_string):
         """Parse timestamp from Nexus API response"""

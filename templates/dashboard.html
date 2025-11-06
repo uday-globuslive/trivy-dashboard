@@ -368,6 +368,14 @@ function loadRecentScans() {
                                 ${project.total_vulnerabilities} vulnerabilities found
                                 <span data-timestamp="${project.last_scan}"></span>
                             </small>
+                            <br>
+                            <small>
+                                <span class="badge ${project.branch_name && project.branch_name !== 'not provided' ? 'bg-info' : 'bg-warning'}">
+                                    ${project.branch_name && project.branch_name !== 'not provided' ? 
+                                        `Branch: ${project.branch_name}` : 
+                                        'Branch: not provided'}
+                                </span>
+                            </small>
                         </div>
                         <div class="flex-shrink-0">
                             <span class="badge bg-${getSeverityColor(project)}">

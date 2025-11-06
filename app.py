@@ -93,14 +93,21 @@ def refresh_data_background():
                                 'medium_count': 0,
                                 'low_count': 0,
                                 'last_scan': None,
+                                'branch_name': 'not provided',
                                 'risk_score': 0
                             }
                         
                         # Store scan data
+                        # Get branch name, defaulting to 'not provided' if None or not present
+                        branch_name = trivy_file.get('branch_name', 'not provided')
+                        if branch_name is None:
+                            branch_name = 'not provided'
+                        
                         scan_data = {
                             'id': scan_id,
                             'project': project_name,
                             'build_number': trivy_file['build_number'],
+                            'branch_name': branch_name,
                             'timestamp': trivy_file['timestamp'],
                             'trivy_report_path': trivy_file['path'],
                             'vulnerabilities': parsed_data['vulnerabilities'],
@@ -122,6 +129,9 @@ def refresh_data_background():
                             projects[project_name]['medium_count'] = vuln_counts['medium']
                             projects[project_name]['low_count'] = vuln_counts['low']
                             projects[project_name]['total_vulnerabilities'] = vuln_counts['total']
+                            # Update branch name from latest scan
+                            branch_name = trivy_file.get('branch_name')
+                            projects[project_name]['branch_name'] = branch_name if branch_name else 'not provided'
                         
                         # Update last scan timestamp
                         if (not projects[project_name]['last_scan'] or 
@@ -701,10 +711,71 @@ def sbom_analysis():
     
     return jsonify(analysis)
 
+@app.route('/scan/<scan_id>/sbom/details')
+def sbom_details(scan_id):
+    """SBOM details view with comprehensive package information"""
+    logger.info(f"📋 Rendering SBOM details for scan: {scan_id}")
+    
+    if scan_id not in app_data['scans']:
+        return "Scan not found", 404
+    
+    scan = app_data['scans'][scan_id]
+    
+    try:
+        # Get the Trivy report path from scan metadata
+        trivy_report_path = scan.get('trivy_report_path')
+        
+        if not trivy_report_path:
+            return "Trivy report path not found in scan metadata", 400
+        
+        logger.debug(f"Loading Trivy data from: {trivy_report_path}")
+        
+        # Fetch Trivy data
+        trivy_content = nexus_client.download_trivy_report(trivy_report_path)
+        
+        # Try to fetch CycloneDX if available (same path, without -trivy-report suffix)
+        cyclonedx_content = None
+        try:
+            logger.debug(f"Attempting to load CycloneDX SBOM from same folder...")
+            cyclonedx_content = nexus_client.download_cyclonedx_sbom(trivy_report_path)
+        except Exception as e:
+            logger.debug(f"CycloneDX SBOM not found or error: {str(e)}")
+        
+        # Always try to use comprehensive parser for the best data
+        from services.comprehensive_sbom_parser import ComprehensiveSBOMParser
+        
+        if cyclonedx_content:
+            # Use comprehensive parser with both data sources
+            logger.debug(f"Using comprehensive SBOM parser with Trivy + CycloneDX data")
+            comprehensive_parser = ComprehensiveSBOMParser(trivy_content, cyclonedx_content)
+            sbom_data = comprehensive_parser.get_comprehensive_sbom_details()
+        else:
+            # Use comprehensive parser with Trivy only (will create empty CycloneDX structure)
+            logger.debug(f"Using comprehensive SBOM parser with Trivy-only data")
+            empty_cyclonedx = {'components': []}
+            comprehensive_parser = ComprehensiveSBOMParser(trivy_content, empty_cyclonedx)
+            sbom_data = comprehensive_parser.get_comprehensive_sbom_details()
+        
+        # Enhance scan info
+        sbom_data['scan_info'] = {
+            'scan_id': scan_id,
+            'scan_date': scan.get('timestamp', '').strftime('%Y-%m-%d %H:%M:%S') if scan.get('timestamp') else 'Unknown'
+        }
+        
+        return render_template('sbom_details.html',
+            scan=scan,
+            sbom=sbom_data
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating SBOM details: {str(e)}")
+        return render_template('error.html',
+            error_message=f"Error generating SBOM details: {str(e)}"), 500
+
 @app.route('/scan/<scan_id>/sbom/export')
-def export_merged_sbom(scan_id):
-    """Export merged SBOM (Trivy + CycloneDX) as SPDX JSON"""
-    logger.info(f"📤 Export merged SBOM for scan: {scan_id}")
+def export_sbom_spdx_json(scan_id):
+    """Export SBOM as SPDX JSON format"""
+    logger.info(f"📤 Export SBOM as SPDX JSON for scan: {scan_id}")
     
     if scan_id not in app_data['scans']:
         return jsonify({'error': 'Scan not found'}), 404
@@ -728,26 +799,63 @@ def export_merged_sbom(scan_id):
         except Exception as e:
             logger.debug(f"CycloneDX not available: {str(e)}")
         
-        # Merge if both available
-        if trivy_content and cyclonedx_content:
-            logger.info(f"Merging Trivy + CycloneDX data for export")
-            hybrid_parser = HybridSBOMParser(trivy_content, cyclonedx_content)
-            spdx_output = hybrid_parser.to_spdx_json()
-            filename = f"{scan['project']}-{scan['build_number']}-merged-sbom.spdx.json"
+        # Generate SPDX using comprehensive parser
+        from services.comprehensive_sbom_parser import ComprehensiveSBOMParser
+        
+        if cyclonedx_content:
+            # Use comprehensive parser with both data sources
+            logger.debug(f"Using comprehensive SBOM parser with Trivy + CycloneDX data")
+            comprehensive_parser = ComprehensiveSBOMParser(trivy_content, cyclonedx_content)
+            filename = f"{scan['project']}-{scan['build_number']}-merged-sbom.spdx"
         else:
-            # Return Trivy if CycloneDX not available
-            import json
-            spdx_output = json.dumps(trivy_content, indent=2)
-            filename = f"{scan['project']}-{scan['build_number']}-trivy-report.json"
+            # Use comprehensive parser with Trivy only
+            logger.debug(f"Using comprehensive SBOM parser with Trivy-only data")
+            empty_cyclonedx = {'components': []}
+            comprehensive_parser = ComprehensiveSBOMParser(trivy_content, empty_cyclonedx)
+            filename = f"{scan['project']}-{scan['build_number']}-trivy-sbom.spdx"
+        
+        # Export to SPDX format (text format, not JSON)
+        spdx_output = comprehensive_parser.export_to_spdx_format()
         
         return Response(
             spdx_output,
+            mimetype='text/plain',
+            headers={'Content-Disposition': f'attachment; filename={filename}'}
+        )
+    
+    except Exception as e:
+        logger.error(f"Error exporting SBOM: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/scan/<scan_id>/sbom/export/json')
+def export_sbom_json(scan_id):
+    """Export SBOM as regular JSON format"""
+    logger.info(f"📤 Export SBOM as JSON for scan: {scan_id}")
+    
+    if scan_id not in app_data['scans']:
+        return jsonify({'error': 'Scan not found'}), 404
+    
+    scan = app_data['scans'][scan_id]
+    trivy_report_path = scan.get('trivy_report_path')
+    
+    if not trivy_report_path:
+        return jsonify({'error': 'Trivy report path not found in scan metadata'}), 400
+    
+    try:
+        # Fetch Trivy data and return as formatted JSON
+        logger.debug(f"Fetching Trivy data from: {trivy_report_path}")
+        trivy_content = nexus_client.download_trivy_report(trivy_report_path)
+        
+        filename = f"{scan['project']}-{scan['build_number']}-trivy-report.json"
+        
+        return Response(
+            json.dumps(trivy_content, indent=2),
             mimetype='application/json',
             headers={'Content-Disposition': f'attachment; filename={filename}'}
         )
     
     except Exception as e:
-        logger.error(f"Error exporting merged SBOM: {str(e)}")
+        logger.error(f"Error exporting JSON: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/components')
@@ -762,6 +870,199 @@ def component_analysis():
         total_projects=total_projects,
         last_updated=format_timestamp(app_data['last_updated']) if app_data['last_updated'] else None
     )
+
+def _convert_trivy_to_packages(trivy_data):
+    """Convert Trivy data to package format for SBOM details"""
+    logger.debug(f"Converting Trivy data to packages...")
+    packages = []
+    packages_dict = {}  # To avoid duplicates and collect vulnerabilities
+    
+    results = trivy_data.get('Results', [])
+    logger.debug(f"Processing {len(results)} results from Trivy report")
+    
+    for result in results:
+        target = result.get('Target', 'Unknown')
+        vulnerabilities = result.get('Vulnerabilities', [])
+        logger.debug(f"Result target: {target}, vulnerabilities: {len(vulnerabilities)}")
+        
+        # Process vulnerabilities first to get package info
+        for vuln in vulnerabilities:
+            pkg_name = vuln.get('PkgName', 'Unknown')
+            pkg_version = vuln.get('InstalledVersion', 'Unknown')
+            pkg_id = vuln.get('PkgID', f"{pkg_name}@{pkg_version}")
+            
+            # Create unique package key
+            pkg_key = f"{pkg_name}:{pkg_version}"
+            
+            # Initialize package if not exists
+            if pkg_key not in packages_dict:
+                packages_dict[pkg_key] = {
+                    'name': pkg_name,
+                    'version': pkg_version,
+                    'spdx_id': f"SPDXRef-Package-{pkg_name.replace(':', '-').replace('/', '-')}-{pkg_version.replace(':', '-').replace('/', '-')}",
+                    'pkg_id': pkg_id,
+                    'license_concluded': 'NOASSERTION',
+                    'license_declared': 'NOASSERTION',
+                    'copyright_text': 'NOASSERTION',
+                    'supplier': 'NOASSERTION',
+                    'primary_purpose': 'LIBRARY',
+                    'component_type': 'library',
+                    'download_location': vuln.get('PkgIdentifier', {}).get('PURL', 'NOASSERTION'),
+                    'verification_code': _generate_verification_code(pkg_name, pkg_version),
+                    'description': f"Package from {target}",
+                    'vulnerabilities': [],
+                    'external_refs': []
+                }
+                
+                # Add PURL external reference if available
+                purl = vuln.get('PkgIdentifier', {}).get('PURL')
+                if purl:
+                    packages_dict[pkg_key]['external_refs'].append({
+                        'category': 'PACKAGE-MANAGER',
+                        'locator': purl
+                    })
+            
+            # Add vulnerability to package
+            packages_dict[pkg_key]['vulnerabilities'].append({
+                'id': vuln.get('VulnerabilityID', 'Unknown'),
+                'severity': vuln.get('Severity', 'UNKNOWN'),
+                'title': vuln.get('Title', 'No title available'),
+                'description': vuln.get('Description', 'No description available'),
+                'fixed_version': vuln.get('FixedVersion', 'N/A'),
+                'primary_url': vuln.get('PrimaryURL', '#')
+            })
+    
+    # Convert to list
+    packages = list(packages_dict.values())
+    logger.debug(f"Final package count: {len(packages)}")
+    
+    if packages:
+        logger.debug(f"Sample package: {packages[0]['name']}:{packages[0]['version']}")
+    
+    # Sort packages by name for consistent display
+    packages.sort(key=lambda x: x['name'])
+    
+    return packages
+
+def _get_trivy_vulnerability_summary(trivy_data):
+    """Get vulnerability summary from Trivy data"""
+    vuln_counts = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0, 'UNKNOWN': 0}
+    total_vulns = 0
+    
+    for result in trivy_data.get('Results', []):
+        for vuln in result.get('Vulnerabilities', []):
+            severity = vuln.get('Severity', 'UNKNOWN')
+            if severity in vuln_counts:
+                vuln_counts[severity] += 1
+            total_vulns += 1
+    
+    return {
+        'total_vulnerabilities': total_vulns,
+        'by_severity': vuln_counts
+    }
+
+def _calculate_trivy_statistics(trivy_data):
+    """Calculate statistics from Trivy data"""
+    total_packages = 0
+    packages_with_vulns = 0
+    
+    for result in trivy_data.get('Results', []):
+        packages = result.get('Packages', [])
+        total_packages += len(packages)
+        
+        # Count packages with vulnerabilities
+        vuln_package_names = set()
+        for vuln in result.get('Vulnerabilities', []):
+            if vuln.get('PkgName'):
+                vuln_package_names.add(vuln.get('PkgName'))
+        
+        packages_with_vulns += len(vuln_package_names)
+    
+    return {
+        'total_packages': total_packages,
+        'packages_with_vulnerabilities': packages_with_vulns,
+        'packages_with_licenses': 0,  # No license info in Trivy reports
+        'license_coverage_percentage': 0,
+        'license_distribution': {}
+    }
+
+def _generate_verification_code(name, version):
+    """Generate a simple verification code for a package"""
+    import hashlib
+    return hashlib.sha256(f"{name}:{version}".encode()).hexdigest()[:16]
+
+def _convert_trivy_to_spdx_json(trivy_data, scan):
+    """Convert Trivy data to SPDX JSON format"""
+    import uuid
+    from datetime import datetime
+    
+    packages = _convert_trivy_to_packages(trivy_data)
+    
+    # Generate document namespace
+    document_namespace = f"http://trivy.dev/{scan['project']}/{scan['build_number']}-{str(uuid.uuid4())}"
+    
+    spdx_doc = {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": f"{scan['project']}-{scan['build_number']}-SBOM",
+        "documentNamespace": document_namespace,
+        "creationInfo": {
+            "created": datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'),
+            "creators": ["Tool: trivy-dashboard"],
+            "licenseListVersion": "3.21"
+        },
+        "packages": [],
+        "relationships": []
+    }
+    
+    # Add root package
+    root_package = {
+        "SPDXID": "SPDXRef-RootPackage",
+        "name": scan['project'],
+        "downloadLocation": "NOASSERTION",
+        "filesAnalyzed": False,
+        "licenseConcluded": "NOASSERTION", 
+        "licenseDeclared": "NOASSERTION",
+        "copyrightText": "NOASSERTION"
+    }
+    spdx_doc["packages"].append(root_package)
+    
+    # Add dependency packages
+    for pkg in packages:
+        spdx_package = {
+            "SPDXID": pkg['spdx_id'],
+            "name": pkg['name'],
+            "versionInfo": pkg['version'],
+            "downloadLocation": pkg['download_location'],
+            "filesAnalyzed": False,
+            "licenseConcluded": pkg['license_concluded'],
+            "licenseDeclared": pkg['license_declared'],
+            "copyrightText": pkg['copyright_text'],
+            "supplier": pkg['supplier'],
+            "primaryPackagePurpose": pkg['primary_purpose']
+        }
+        
+        # Add external references
+        if pkg['external_refs']:
+            spdx_package["externalRefs"] = [
+                {
+                    "referenceCategory": ref['category'],
+                    "referenceLocator": ref['locator'],
+                    "referenceType": "purl"
+                } for ref in pkg['external_refs']
+            ]
+        
+        spdx_doc["packages"].append(spdx_package)
+        
+        # Add relationship
+        spdx_doc["relationships"].append({
+            "spdxElementId": "SPDXRef-RootPackage",
+            "relationshipType": "DEPENDS_ON",
+            "relatedSpdxElement": pkg['spdx_id']
+        })
+    
+    return spdx_doc
 
 @app.errorhandler(500)
 def internal_error(error):

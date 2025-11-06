@@ -8,7 +8,7 @@
     <div class="col-12">
         <div id="sbom-type-alert" class="alert alert-info" role="alert">
             <h4 class="alert-heading"><i class="fas fa-info-circle"></i> SBOM Analysis</h4>
-            <p class="mb-0">Loading SBOM analysis...</p>
+            <p class="mb-0" id="loading-text">Loading SBOM analysis data... Please wait.</p>
         </div>
     </div>
 </div>
@@ -195,155 +195,77 @@
 </div>
 
 <script>
+console.log('Script loading...');
+
 $(document).ready(function() {
-    loadSBOMAnalysis();
+    console.log('jQuery document ready - starting SBOM analysis');
     
-    function loadSBOMAnalysis() {
-        fetch('/api/sbom-analysis')
-            .then(response => response.json())
-            .then(data => {
-                updateSummaryCards(data);
-                updateRecommendations(data);
-                updateTrivyCommands(data);
-                updateProjectsTable(data);
-                updateAlert(data);
-            })
-            .catch(error => {
-                console.error('Error loading SBOM analysis:', error);
-                showError('Failed to load SBOM analysis');
-            });
-    }
+    // Update loading text
+    $('#loading-text').text('Loading SBOM analysis data...');
     
-    function updateSummaryCards(data) {
-        $('#component-only-count').text(data.projects_component_only);
-        $('#vuln-enhanced-count').text(data.projects_with_vulnerabilities);
-    }
-    
-    function updateAlert(data) {
-        const alertDiv = $('#sbom-type-alert');
-        if (data.projects_with_vulnerabilities === 0) {
-            alertDiv.removeClass('alert-info').addClass('alert-warning');
-            alertDiv.html(`
-                <h4 class="alert-heading"><i class="fas fa-exclamation-triangle"></i> Component-Only SBOMs Detected</h4>
-                <p>Your SBOM files contain component information but no vulnerability data. This dashboard is designed to show security insights from vulnerability-enhanced SBOMs.</p>
-                <hr>
-                <p class="mb-0"><strong>Recommendation:</strong> Use Trivy to generate vulnerability-enhanced SBOMs for complete security analysis.</p>
+    // Make API call
+    fetch('/api/sbom-analysis')
+        .then(response => {
+            console.log('Response status:', response.status);
+            return response.json();
+        })
+        .then(data => {
+            console.log('Data received:', data);
+            
+            // Update the summary cards
+            $('#component-only-count').text(data.projects_component_only || 0);
+            $('#vuln-enhanced-count').text(data.projects_with_vulnerabilities || 0);
+            
+            // Update the main alert
+            $('#sbom-type-alert').removeClass('alert-info').addClass('alert-success');
+            $('#sbom-type-alert').html(`
+                <h4 class="alert-heading"><i class="fas fa-check-circle"></i> SBOM Analysis Complete</h4>
+                <p class="mb-0">Found ${data.total_projects} project(s) with ${data.projects_with_vulnerabilities} vulnerability-enhanced SBOMs.</p>
             `);
-        } else if (data.projects_component_only > 0) {
-            alertDiv.removeClass('alert-info').addClass('alert-info');
-            alertDiv.html(`
-                <h4 class="alert-heading"><i class="fas fa-info-circle"></i> Mixed SBOM Types</h4>
-                <p>You have ${data.projects_with_vulnerabilities} projects with vulnerability data and ${data.projects_component_only} with component-only SBOMs.</p>
-                <p class="mb-0">Consider enhancing all SBOMs with vulnerability data for comprehensive security analysis.</p>
-            `);
-        } else {
-            alertDiv.removeClass('alert-warning').addClass('alert-success');
-            alertDiv.html(`
-                <h4 class="alert-heading"><i class="fas fa-check-circle"></i> Vulnerability-Enhanced SBOMs</h4>
-                <p class="mb-0">All your SBOM files contain vulnerability data. Great work on comprehensive security analysis!</p>
-            `);
-        }
-    }
-    
-    function updateRecommendations(data) {
-        const recommendationsDiv = $('#recommendations-content');
-        if (data.recommendations.length === 0) {
-            recommendationsDiv.html('<p class="text-muted">No recommendations at this time.</p>');
-            return;
-        }
-        
-        let html = '';
-        data.recommendations.forEach(rec => {
-            const badgeClass = rec.priority === 'critical' ? 'danger' : rec.priority === 'high' ? 'warning' : 'info';
-            html += `
-                <div class="alert alert-${badgeClass} mb-3">
-                    <h6 class="font-weight-bold">${rec.title}</h6>
-                    <p class="mb-2">${rec.description}</p>
-                    <small><strong>Action:</strong> ${rec.action}</small>
-                </div>
-            `;
+            
+            // Update recommendations section
+            if (data.recommendations && data.recommendations.length > 0) {
+                let html = '';
+                data.recommendations.forEach(rec => {
+                    html += `<div class="alert alert-info">${rec.title}</div>`;
+                });
+                $('#recommendations-content').html(html);
+            } else {
+                $('#recommendations-content').html('<p class="text-muted">No recommendations at this time.</p>');
+            }
+            
+            // Update project table
+            const tbody = $('#projects-table-body');
+            if (data.projects_detail && data.projects_detail.length > 0) {
+                let tableHtml = '';
+                data.projects_detail.forEach(project => {
+                    const typeLabel = project.has_vulnerabilities ? 
+                        '<span class="badge badge-success">Vulnerability-Enhanced</span>' : 
+                        '<span class="badge badge-warning">Component-Only</span>';
+                    
+                    tableHtml += `
+                        <tr>
+                            <td><strong>${project.name}</strong></td>
+                            <td>${typeLabel}</td>
+                            <td>${project.total_scans}</td>
+                            <td>${project.component_count}</td>
+                            <td>${project.has_vulnerabilities ? 'Available' : 'Not Available'}</td>
+                            <td>${project.latest_scan}</td>
+                            <td><button class="btn btn-sm btn-primary">View Details</button></td>
+                        </tr>
+                    `;
+                });
+                tbody.html(tableHtml);
+            } else {
+                tbody.html('<tr><td colspan="7" class="text-center">No projects found</td></tr>');
+            }
+            
+            console.log('All updates completed successfully');
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            $('#loading-text').text('Error loading SBOM data: ' + error.message);
         });
-        recommendationsDiv.html(html);
-    }
-    
-    function updateTrivyCommands(data) {
-        if (data.trivy_commands && Object.keys(data.trivy_commands).length > 0) {
-            $('#trivy-commands-section').show();
-            
-            if (data.trivy_commands.container_image) {
-                $('#trivy-image-cmd').text(data.trivy_commands.container_image.command);
-                $('#trivy-image-desc').text(data.trivy_commands.container_image.description);
-            }
-            
-            if (data.trivy_commands.filesystem) {
-                $('#trivy-fs-cmd').text(data.trivy_commands.filesystem.command);
-                $('#trivy-fs-desc').text(data.trivy_commands.filesystem.description);
-            }
-            
-            if (data.trivy_commands.repository) {
-                $('#trivy-repo-cmd').text(data.trivy_commands.repository.command);
-                $('#trivy-repo-desc').text(data.trivy_commands.repository.description);
-            }
-            
-            if (data.trivy_commands.upload_to_nexus) {
-                $('#trivy-upload-cmd').text(data.trivy_commands.upload_to_nexus.command);
-                $('#trivy-upload-desc').text(data.trivy_commands.upload_to_nexus.description);
-            }
-        }
-    }
-    
-    function updateProjectsTable(data) {
-        const tbody = $('#projects-table-body');
-        let html = '';
-        
-        if (data.projects_detail.length === 0) {
-            html = '<tr><td colspan="7" class="text-center text-muted">No projects found</td></tr>';
-        } else {
-            data.projects_detail.forEach(project => {
-                const typeLabel = project.has_vulnerabilities ? 
-                    '<span class="badge badge-success">Vulnerability-Enhanced</span>' : 
-                    '<span class="badge badge-warning">Component-Only</span>';
-                
-                const actionButton = project.has_vulnerabilities ? 
-                    '<button class="btn btn-sm btn-primary" onclick="viewProject(\'' + project.name + '\')">View Security</button>' :
-                    '<button class="btn btn-sm btn-outline-warning" onclick="showEnhanceGuide(\'' + project.name + '\')">Enhance SBOM</button>';
-                
-                html += `
-                    <tr>
-                        <td><strong>${project.name}</strong></td>
-                        <td>${typeLabel}</td>
-                        <td>${project.total_scans}</td>
-                        <td>${project.component_count}</td>
-                        <td>${project.has_vulnerabilities ? 'Available' : 'Not Available'}</td>
-                        <td>${project.latest_scan}</td>
-                        <td>${actionButton}</td>
-                    </tr>
-                `;
-            });
-        }
-        
-        tbody.html(html);
-    }
-    
-    function showError(message) {
-        $('#sbom-type-alert').removeClass('alert-info').addClass('alert-danger');
-        $('#sbom-type-alert').html(`
-            <h4 class="alert-heading"><i class="fas fa-exclamation-circle"></i> Error</h4>
-            <p class="mb-0">${message}</p>
-        `);
-    }
 });
-
-function viewProject(projectName) {
-    window.location.href = `/project/${projectName}`;
-}
-
-function showEnhanceGuide(projectName) {
-    alert(`To enhance ${projectName} SBOM with vulnerability data:\n\n` +
-          `1. Run Trivy scan on your project\n` +
-          `2. Generate CycloneDX SBOM with vulnerabilities\n` +
-          `3. Upload enhanced SBOM to McCamish Nexus\n\n` +
-          `Check the Trivy Commands section for specific commands.`);
-}
 </script>
 {% endblock %}
