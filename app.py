@@ -701,68 +701,10 @@ def sbom_analysis():
     
     return jsonify(analysis)
 
-@app.route('/scan/<scan_id>/sbom/details')
-def sbom_details(scan_id):
-    """Comprehensive SBOM details view with package information"""
-    logger.info(f"📊 SBOM details requested for scan: {scan_id}")
-    
-    if scan_id not in app_data['scans']:
-        return "Scan not found", 404
-    
-    scan = app_data['scans'][scan_id]
-    trivy_report_path = scan.get('trivy_report_path')
-    
-    if not trivy_report_path:
-        return render_template('error.html', 
-                             error="Trivy report path not found in scan metadata"), 400
-    
-    try:
-        # Import the comprehensive SBOM parser
-        from services.comprehensive_sbom_parser import ComprehensiveSBOMParser
-        
-        # Fetch Trivy data
-        logger.debug(f"Fetching Trivy data from: {trivy_report_path}")
-        trivy_content = nexus_client.download_trivy_report(trivy_report_path)
-        
-        # Try to fetch CycloneDX from same path
-        cyclonedx_content = None
-        try:
-            logger.debug(f"Attempting to fetch CycloneDX SBOM...")
-            cyclonedx_content = nexus_client.download_cyclonedx_sbom(trivy_report_path)
-        except Exception as e:
-            logger.debug(f"CycloneDX not available: {str(e)}")
-            # Use empty CycloneDX structure if not available
-            cyclonedx_content = {"components": []}
-        
-        # Parse with comprehensive SBOM parser
-        logger.debug("Parsing comprehensive SBOM details...")
-        parser = ComprehensiveSBOMParser(trivy_content, cyclonedx_content)
-        sbom_details = parser.get_comprehensive_sbom_details()
-        
-        # Add scan context
-        sbom_details['scan_info'] = {
-            'scan_id': scan_id,
-            'project_name': scan.get('project_name'),
-            'scan_date': scan.get('scan_date'),
-            'target': scan.get('target_name'),
-            'report_path': trivy_report_path
-        }
-        
-        logger.info(f"✅ Generated comprehensive SBOM with {sbom_details['statistics']['total_packages']} packages")
-        
-        return render_template('sbom_details.html', 
-                             scan=scan,
-                             sbom=sbom_details)
-        
-    except Exception as e:
-        logger.error(f"❌ Error generating SBOM details: {str(e)}")
-        return render_template('error.html', 
-                             error=f"Error generating SBOM details: {str(e)}"), 500
-
 @app.route('/scan/<scan_id>/sbom/export')
-def export_comprehensive_sbom(scan_id):
-    """Export comprehensive SBOM (Trivy + CycloneDX) as SPDX text format"""
-    logger.info(f"📤 Export comprehensive SBOM for scan: {scan_id}")
+def export_merged_sbom(scan_id):
+    """Export merged SBOM (Trivy + CycloneDX) as SPDX JSON"""
+    logger.info(f"📤 Export merged SBOM for scan: {scan_id}")
     
     if scan_id not in app_data['scans']:
         return jsonify({'error': 'Scan not found'}), 404
@@ -774,108 +716,38 @@ def export_comprehensive_sbom(scan_id):
         return jsonify({'error': 'Trivy report path not found in scan metadata'}), 400
     
     try:
-        # Import the comprehensive SBOM parser
-        from services.comprehensive_sbom_parser import ComprehensiveSBOMParser
-        
         # Fetch Trivy data
         logger.debug(f"Fetching Trivy data from: {trivy_report_path}")
         trivy_content = nexus_client.download_trivy_report(trivy_report_path)
         
-        # Try to fetch CycloneDX from same path
+        # Try to fetch CycloneDX from same path (without -trivy-report suffix)
         cyclonedx_content = None
         try:
             logger.debug(f"Attempting to fetch CycloneDX SBOM...")
             cyclonedx_content = nexus_client.download_cyclonedx_sbom(trivy_report_path)
         except Exception as e:
             logger.debug(f"CycloneDX not available: {str(e)}")
-            # Use empty CycloneDX structure if not available
-            cyclonedx_content = {"components": []}
         
-        # Generate comprehensive SPDX export
-        logger.info(f"Generating comprehensive SPDX export with ComprehensiveSBOMParser")
-        parser = ComprehensiveSBOMParser(trivy_content, cyclonedx_content)
-        spdx_output = parser.export_to_spdx_format()
-        
-        # Generate filename
-        project_name = scan.get('project', 'unknown')
-        build_number = scan.get('build_number', 'unknown')
-        scan_timestamp = scan.get('timestamp', 'unknown')
-        # Format timestamp for filename
-        if scan_timestamp != 'unknown' and hasattr(scan_timestamp, 'strftime'):
-            scan_date = scan_timestamp.strftime('%Y%m%d_%H%M%S')
+        # Merge if both available
+        if trivy_content and cyclonedx_content:
+            logger.info(f"Merging Trivy + CycloneDX data for export")
+            hybrid_parser = HybridSBOMParser(trivy_content, cyclonedx_content)
+            spdx_output = hybrid_parser.to_spdx_json()
+            filename = f"{scan['project']}-{scan['build_number']}-merged-sbom.spdx.json"
         else:
-            scan_date = str(scan_timestamp).replace(':', '-').replace(' ', '_') if scan_timestamp != 'unknown' else 'unknown'
-        filename = f"{project_name}-build{build_number}-{scan_date}-sbom.spdx"
-        
-        logger.info(f"✅ Generated SPDX export: {len(spdx_output)} characters")
+            # Return Trivy if CycloneDX not available
+            import json
+            spdx_output = json.dumps(trivy_content, indent=2)
+            filename = f"{scan['project']}-{scan['build_number']}-trivy-report.json"
         
         return Response(
             spdx_output,
-            mimetype='text/plain',
-            headers={'Content-Disposition': f'attachment; filename={filename}'}
-        )
-    
-    except Exception as e:
-        logger.error(f"❌ Error exporting comprehensive SBOM: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/scan/<scan_id>/sbom/export/json')
-def export_comprehensive_sbom_json(scan_id):
-    """Export comprehensive SBOM data as JSON format"""
-    logger.info(f"📤 Export comprehensive SBOM JSON for scan: {scan_id}")
-    
-    if scan_id not in app_data['scans']:
-        return jsonify({'error': 'Scan not found'}), 404
-    
-    scan = app_data['scans'][scan_id]
-    trivy_report_path = scan.get('trivy_report_path')
-    
-    if not trivy_report_path:
-        return jsonify({'error': 'Trivy report path not found in scan metadata'}), 400
-    
-    try:
-        # Import the comprehensive SBOM parser
-        from services.comprehensive_sbom_parser import ComprehensiveSBOMParser
-        
-        # Fetch Trivy data
-        logger.debug(f"Fetching Trivy data from: {trivy_report_path}")
-        trivy_content = nexus_client.download_trivy_report(trivy_report_path)
-        
-        # Try to fetch CycloneDX from same path
-        cyclonedx_content = None
-        try:
-            logger.debug(f"Attempting to fetch CycloneDX SBOM...")
-            cyclonedx_content = nexus_client.download_cyclonedx_sbom(trivy_report_path)
-        except Exception as e:
-            logger.debug(f"CycloneDX not available: {str(e)}")
-            cyclonedx_content = {"components": []}
-        
-        # Generate comprehensive SBOM data
-        logger.info(f"Generating comprehensive SBOM JSON export")
-        parser = ComprehensiveSBOMParser(trivy_content, cyclonedx_content)
-        sbom_data = parser.get_comprehensive_sbom_details()
-        
-        # Generate filename
-        project_name = scan.get('project', 'unknown')
-        build_number = scan.get('build_number', 'unknown')
-        scan_timestamp = scan.get('timestamp', 'unknown')
-        # Format timestamp for filename
-        if scan_timestamp != 'unknown' and hasattr(scan_timestamp, 'strftime'):
-            scan_date = scan_timestamp.strftime('%Y%m%d_%H%M%S')
-        else:
-            scan_date = str(scan_timestamp).replace(':', '-').replace(' ', '_') if scan_timestamp != 'unknown' else 'unknown'
-        filename = f"{project_name}-build{build_number}-{scan_date}-sbom.json"
-        
-        logger.info(f"✅ Generated JSON export: {len(sbom_data['packages'])} packages")
-        
-        return Response(
-            json.dumps(sbom_data, indent=2, default=str),
             mimetype='application/json',
             headers={'Content-Disposition': f'attachment; filename={filename}'}
         )
     
     except Exception as e:
-        logger.error(f"❌ Error exporting comprehensive SBOM JSON: {str(e)}")
+        logger.error(f"Error exporting merged SBOM: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/components')
