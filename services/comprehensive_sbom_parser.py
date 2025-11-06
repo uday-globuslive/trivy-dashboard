@@ -1,14 +1,29 @@
 """
 Comprehensive SBOM Parser - Extracts detailed package information
-from Trivy JSON, CycloneDX, and derives SPDX-like details
+from Trivy JSON and CycloneDX files to generate SPDX-like details
 
-This parser provides comprehensive SBOM information similar to what's found in SPDX format:
-- Package names, versions, and purposes
-- Security vulnerabilities with CVE details
-- Package verification codes (checksums)
-- License information (from CycloneDX)
-- External references (PURL, advisory links)
-- Package relationships and dependencies
+This parser recreates comprehensive SBOM information similar to SPDX format
+using ONLY Trivy JSON and CycloneDX data sources available from Nexus:
+
+DATA MAPPING:
+- PackageName: Trivy 'PkgName'
+- PackageVersion: Trivy 'InstalledVersion' 
+- PackageSupplier: Derived from CycloneDX 'group' or NOASSERTION
+- PackageDownloadLocation: Trivy/CycloneDX 'purl' or NONE
+- PrimaryPackagePurpose: CycloneDX 'type' (library/application/etc.)
+- PackageVerificationCode: Generated from name+version hash
+- PackageLicenseConcluded: CycloneDX 'licenses'
+- PackageLicenseDeclared: Same as concluded from CycloneDX
+- ExternalRef: PURL from either source + vulnerability advisory URLs
+- Vulnerabilities: Complete CVE details from Trivy with CVSS scores
+
+FEATURES:
+- No dependency on SPDX files (works with Nexus-available formats only)
+- Comprehensive package details matching SPDX standard
+- Security vulnerabilities integrated per package
+- License information from CycloneDX components
+- Generated verification codes and relationships
+- Performance optimized for large datasets (7000+ packages)
 """
 
 import json
