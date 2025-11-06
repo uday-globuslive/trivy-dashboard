@@ -797,9 +797,15 @@ def export_comprehensive_sbom(scan_id):
         spdx_output = parser.export_to_spdx_format()
         
         # Generate filename
-        project_name = scan.get('project_name', 'unknown')
-        scan_date = scan.get('scan_date', 'unknown')
-        filename = f"{project_name}-{scan_date}-comprehensive-sbom.spdx"
+        project_name = scan.get('project', 'unknown')
+        build_number = scan.get('build_number', 'unknown')
+        scan_timestamp = scan.get('timestamp', 'unknown')
+        # Format timestamp for filename
+        if scan_timestamp != 'unknown' and hasattr(scan_timestamp, 'strftime'):
+            scan_date = scan_timestamp.strftime('%Y%m%d_%H%M%S')
+        else:
+            scan_date = str(scan_timestamp).replace(':', '-').replace(' ', '_') if scan_timestamp != 'unknown' else 'unknown'
+        filename = f"{project_name}-build{build_number}-{scan_date}-sbom.spdx"
         
         logger.info(f"✅ Generated SPDX export: {len(spdx_output)} characters")
         
@@ -850,9 +856,15 @@ def export_comprehensive_sbom_json(scan_id):
         sbom_data = parser.get_comprehensive_sbom_details()
         
         # Generate filename
-        project_name = scan.get('project_name', 'unknown')
-        scan_date = scan.get('scan_date', 'unknown')
-        filename = f"{project_name}-{scan_date}-comprehensive-sbom.json"
+        project_name = scan.get('project', 'unknown')
+        build_number = scan.get('build_number', 'unknown')
+        scan_timestamp = scan.get('timestamp', 'unknown')
+        # Format timestamp for filename
+        if scan_timestamp != 'unknown' and hasattr(scan_timestamp, 'strftime'):
+            scan_date = scan_timestamp.strftime('%Y%m%d_%H%M%S')
+        else:
+            scan_date = str(scan_timestamp).replace(':', '-').replace(' ', '_') if scan_timestamp != 'unknown' else 'unknown'
+        filename = f"{project_name}-build{build_number}-{scan_date}-sbom.json"
         
         logger.info(f"✅ Generated JSON export: {len(sbom_data['packages'])} packages")
         

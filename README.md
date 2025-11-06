@@ -20,7 +20,7 @@ This dashboard provides real-time security insights by:
 
 ### Application Level Views
 - **Vulnerability Trends**: Track vulnerabilities over time (when vulnerability data available)
-- **Risk Assessment**: Critical, High, Medium, Low severity breakdown
+- **Risk Assessment**: Critical, High, Medium, Low severity breakdown ([📊 Risk Assessment Guide](RISK_ASSESSMENT_GUIDE.md))
 - **Component Analysis**: Component inventory, dependencies, and licenses
 - **Compliance Reports**: Security posture across all applications
 
@@ -214,6 +214,14 @@ export FLASK_DEBUG=1
 export LOG_LEVEL=DEBUG
 python app.py
 ```
+
+## 📚 Documentation
+
+### Detailed Guides
+- **[📊 Risk Assessment Guide](RISK_ASSESSMENT_GUIDE.md)**: Comprehensive guide to risk calculation methodology, scoring system, and best practices
+- **[🔧 SBOM Enhancement Guide](SBOM_ENHANCEMENT_GUIDE.md)**: Instructions for enhancing SBOMs with vulnerability data
+- **[⚙️ Setup Guide](SETUP_GUIDE.md)**: Detailed installation and configuration instructions
+- **[🐳 Docker Setup](DOCKER_SETUP.md)**: Container deployment and Docker configuration
 
 ## 📚 Dependencies
 
