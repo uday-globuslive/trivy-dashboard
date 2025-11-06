@@ -251,7 +251,7 @@ $(document).ready(function() {
                             <td>${project.component_count}</td>
                             <td>${project.has_vulnerabilities ? 'Available' : 'Not Available'}</td>
                             <td>${project.latest_scan}</td>
-                            <td><button class="btn btn-sm btn-primary">View Details</button></td>
+                            <td><button class="btn btn-sm btn-primary" onclick="viewProjectDetails('${project.name}')">View Details</button></td>
                         </tr>
                     `;
                 });
@@ -263,9 +263,14 @@ $(document).ready(function() {
             console.log('All updates completed successfully');
         })
         .catch(error => {
-            console.error('Error:', error);
+            console.log('Error:', error);
             $('#loading-text').text('Error loading SBOM data: ' + error.message);
         });
 });
+
+// Function to view project details
+function viewProjectDetails(projectName) {
+    window.location.href = `/project/${projectName}`;
+}
 </script>
 {% endblock %}
