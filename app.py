@@ -6,9 +6,10 @@ Trivy security scan results from native Trivy report JSON files stored in Nexus 
 """
 
 import os
+import json
 import logging
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, Response
 from flask_cors import CORS
 import threading
 import time

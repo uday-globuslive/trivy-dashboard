@@ -1,0 +1,499 @@
+{% extends "base.html" %}
+
+{% block title %}SBOM Details - {{ scan.project_name }} - Trivy Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Header with scan info -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="mb-1">
+                        <i class="fas fa-list-alt"></i> 
+                        SBOM Details
+                    </h2>
+                    <p class="text-muted mb-0">
+                        <strong>{{ sbom.document_info.name }}</strong> • 
+                        Scan ID: {{ sbom.scan_info.scan_id }} • 
+                        {{ sbom.scan_info.scan_date }}
+                    </p>
+                </div>
+                <div>
+                    <a href="/scan/{{ scan.id }}" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left"></i> Back to Scan
+                    </a>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-download"></i> Export
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="/scan/{{ scan.id }}/sbom/export" target="_blank">
+                                <i class="fas fa-file-alt"></i> SPDX Text Format
+                            </a></li>
+                            <li><a class="dropdown-item" href="/scan/{{ scan.id }}/sbom/export/json" target="_blank">
+                                <i class="fas fa-file-code"></i> JSON Format
+                            </a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h4 class="text-primary">{{ sbom.statistics.total_packages }}</h4>
+                    <p class="mb-0">Total Packages</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h4 class="text-danger">{{ sbom.statistics.packages_with_vulnerabilities }}</h4>
+                    <p class="mb-0">With Vulnerabilities</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h4 class="text-success">{{ sbom.statistics.packages_with_licenses }}</h4>
+                    <p class="mb-0">With Licenses</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h4 class="text-info">{{ sbom.statistics.license_coverage_percentage }}%</h4>
+                    <p class="mb-0">License Coverage</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vulnerability Summary -->
+    {% if sbom.vulnerabilities.total_vulnerabilities > 0 %}
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-shield-alt"></i> 
+                        Vulnerability Summary
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        {% for severity, count in sbom.vulnerabilities.by_severity.items() %}
+                        {% if count > 0 %}
+                        <div class="col-md-2">
+                            <div class="text-center">
+                                <span class="badge badge-{% if severity == 'CRITICAL' %}danger{% elif severity == 'HIGH' %}warning{% elif severity == 'MEDIUM' %}info{% else %}secondary{% endif %} badge-lg">
+                                    {{ count }}
+                                </span>
+                                <div class="small">{{ severity }}</div>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Search and Filter -->
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <div class="input-group">
+                <input type="text" id="packageSearch" class="form-control" placeholder="Search packages by name...">
+                <div class="input-group-append">
+                    <span class="input-group-text"><i class="fas fa-search"></i></span>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="d-flex">
+                <select id="vulnerabilityFilter" class="form-control mr-2">
+                    <option value="all">All Packages</option>
+                    <option value="with-vulns">With Vulnerabilities</option>
+                    <option value="no-vulns">No Vulnerabilities</option>
+                </select>
+                <select id="licenseFilter" class="form-control">
+                    <option value="all">All Licenses</option>
+                    <option value="with-license">With License</option>
+                    <option value="no-license">No License Info</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Package Details Table -->
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-boxes"></i> 
+                        Package Details
+                        <span class="badge badge-secondary ml-2" id="packageCount">{{ sbom.statistics.total_packages }} packages</span>
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-striped mb-0" id="packagesTable">
+                            <thead class="thead-light">
+                                <tr>
+                                    <th style="width: 25%">Package</th>
+                                    <th style="width: 10%">Version</th>
+                                    <th style="width: 15%">License</th>
+                                    <th style="width: 15%">Purpose</th>
+                                    <th style="width: 10%">Vulnerabilities</th>
+                                    <th style="width: 15%">Supplier</th>
+                                    <th style="width: 10%">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for package in sbom.packages %}
+                                <tr class="package-row" 
+                                    data-package-name="{{ package.name|lower }}"
+                                    data-has-vulns="{% if package.vulnerabilities %}true{% else %}false{% endif %}"
+                                    data-has-license="{% if package.license_concluded != 'NOASSERTION' %}true{% else %}false{% endif %}">
+                                    
+                                    <td>
+                                        <strong>{{ package.name }}</strong>
+                                        {% if package.description %}
+                                        <br><small class="text-muted">{{ package.description[:80] }}{% if package.description|length > 80 %}...{% endif %}</small>
+                                        {% endif %}
+                                    </td>
+                                    
+                                    <td>
+                                        <code>{{ package.version }}</code>
+                                        {% if package.pkg_id %}
+                                        <br><small class="text-muted">ID: {{ package.pkg_id }}</small>
+                                        {% endif %}
+                                    </td>
+                                    
+                                    <td>
+                                        {% if package.license_concluded != 'NOASSERTION' %}
+                                            <span class="badge badge-info">{{ package.license_concluded }}</span>
+                                            {% if package.license_declared != package.license_concluded %}
+                                            <br><small class="text-muted">Declared: {{ package.license_declared }}</small>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="text-muted">No license info</span>
+                                        {% endif %}
+                                    </td>
+                                    
+                                    <td>
+                                        <span class="badge badge-secondary">{{ package.primary_purpose }}</span>
+                                        {% if package.component_type != 'library' %}
+                                        <br><small class="text-muted">Type: {{ package.component_type }}</small>
+                                        {% endif %}
+                                    </td>
+                                    
+                                    <td>
+                                        {% if package.vulnerabilities %}
+                                            {% set vuln_count = package.vulnerabilities|length %}
+                                            {% set critical_count = package.vulnerabilities|selectattr('severity', 'equalto', 'CRITICAL')|list|length %}
+                                            {% set high_count = package.vulnerabilities|selectattr('severity', 'equalto', 'HIGH')|list|length %}
+                                            
+                                            {% if critical_count > 0 %}
+                                            <span class="badge badge-danger">{{ critical_count }} Critical</span><br>
+                                            {% endif %}
+                                            {% if high_count > 0 %}
+                                            <span class="badge badge-warning">{{ high_count }} High</span><br>
+                                            {% endif %}
+                                            {% if vuln_count - critical_count - high_count > 0 %}
+                                            <span class="badge badge-info">{{ vuln_count - critical_count - high_count }} Other</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="text-success"><i class="fas fa-check"></i> None</span>
+                                        {% endif %}
+                                    </td>
+                                    
+                                    <td>
+                                        {{ package.supplier }}
+                                        {% if package.copyright_text and package.copyright_text != 'NOASSERTION' %}
+                                        <br><small class="text-muted">{{ package.copyright_text[:30] }}{% if package.copyright_text|length > 30 %}...{% endif %}</small>
+                                        {% endif %}
+                                    </td>
+                                    
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-info" 
+                                                onclick="showPackageDetails('{{ package.spdx_id }}', '{{ package.name }}', '{{ package.version }}')"
+                                                title="View detailed package information">
+                                            <i class="fas fa-info-circle"></i>
+                                        </button>
+                                        {% if package.external_refs %}
+                                        {% for ref in package.external_refs %}
+                                        {% if ref.category == 'PACKAGE-MANAGER' %}
+                                        <a href="{{ ref.locator }}" target="_blank" class="btn btn-sm btn-outline-primary" title="Package URL">
+                                            <i class="fas fa-external-link-alt"></i>
+                                        </a>
+                                        {% endif %}
+                                        {% endfor %}
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Document Information -->
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-file-alt"></i> 
+                        Document Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <tr>
+                            <td><strong>Document Name:</strong></td>
+                            <td>{{ sbom.document_info.name }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>SPDX Version:</strong></td>
+                            <td>{{ sbom.document_info.spdx_version }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Schema Version:</strong></td>
+                            <td>{{ sbom.document_info.schema_version }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Artifact Type:</strong></td>
+                            <td>{{ sbom.document_info.artifact_type }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Created:</strong></td>
+                            <td>{{ sbom.document_info.created_at }}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-pie"></i> 
+                        License Distribution
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if sbom.statistics.license_distribution %}
+                    <div class="license-chart" style="max-height: 200px; overflow-y: auto;">
+                        {% for license, count in sbom.statistics.license_distribution.items() %}
+                        {% if license != 'NOASSERTION' %}
+                        <div class="d-flex justify-content-between mb-1">
+                            <span class="small">{{ license }}</span>
+                            <span class="badge badge-secondary">{{ count }}</span>
+                        </div>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No license information available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Package Details Modal -->
+<div class="modal fade" id="packageDetailsModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Package Details</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body" id="packageDetailsBody">
+                <div class="text-center">
+                    <div class="spinner-border" role="status">
+                        <span class="sr-only">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Search and filter functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('packageSearch');
+    const vulnerabilityFilter = document.getElementById('vulnerabilityFilter');
+    const licenseFilter = document.getElementById('licenseFilter');
+    const packageRows = document.querySelectorAll('.package-row');
+    const packageCount = document.getElementById('packageCount');
+
+    function filterPackages() {
+        const searchTerm = searchInput.value.toLowerCase();
+        const vulnFilter = vulnerabilityFilter.value;
+        const licFilter = licenseFilter.value;
+        let visibleCount = 0;
+
+        packageRows.forEach(row => {
+            const packageName = row.dataset.packageName;
+            const hasVulns = row.dataset.hasVulns === 'true';
+            const hasLicense = row.dataset.hasLicense === 'true';
+
+            let show = true;
+
+            // Search filter
+            if (searchTerm && !packageName.includes(searchTerm)) {
+                show = false;
+            }
+
+            // Vulnerability filter
+            if (vulnFilter === 'with-vulns' && !hasVulns) {
+                show = false;
+            } else if (vulnFilter === 'no-vulns' && hasVulns) {
+                show = false;
+            }
+
+            // License filter
+            if (licFilter === 'with-license' && !hasLicense) {
+                show = false;
+            } else if (licFilter === 'no-license' && hasLicense) {
+                show = false;
+            }
+
+            row.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
+        });
+
+        packageCount.textContent = `${visibleCount} packages`;
+    }
+
+    searchInput.addEventListener('input', filterPackages);
+    vulnerabilityFilter.addEventListener('change', filterPackages);
+    licenseFilter.addEventListener('change', filterPackages);
+});
+
+// Package details modal
+function showPackageDetails(spdxId, packageName, version) {
+    const modal = new bootstrap.Modal(document.getElementById('packageDetailsModal'));
+    const modalBody = document.getElementById('packageDetailsBody');
+    
+    // Find package data
+    const packages = {{ sbom.packages | tojson }};
+    const package = packages.find(p => p.spdx_id === spdxId);
+    
+    if (!package) {
+        modalBody.innerHTML = '<div class="alert alert-warning">Package details not found</div>';
+        modal.show();
+        return;
+    }
+    
+    modalBody.innerHTML = `
+        <div class="row">
+            <div class="col-md-6">
+                <h6>Basic Information</h6>
+                <table class="table table-sm">
+                    <tr><td><strong>SPDX ID:</strong></td><td><code>${package.spdx_id}</code></td></tr>
+                    <tr><td><strong>Package Name:</strong></td><td>${package.name}</td></tr>
+                    <tr><td><strong>Version:</strong></td><td><code>${package.version}</code></td></tr>
+                    <tr><td><strong>Package ID:</strong></td><td><code>${package.pkg_id}</code></td></tr>
+                    <tr><td><strong>Supplier:</strong></td><td>${package.supplier}</td></tr>
+                    <tr><td><strong>Purpose:</strong></td><td>${package.primary_purpose}</td></tr>
+                    <tr><td><strong>Download Location:</strong></td><td><code>${package.download_location}</code></td></tr>
+                    <tr><td><strong>Verification Code:</strong></td><td><small><code>${package.verification_code}</code></small></td></tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <h6>License Information</h6>
+                <table class="table table-sm">
+                    <tr><td><strong>Concluded:</strong></td><td>${package.license_concluded}</td></tr>
+                    <tr><td><strong>Declared:</strong></td><td>${package.license_declared}</td></tr>
+                    <tr><td><strong>Copyright:</strong></td><td>${package.copyright_text}</td></tr>
+                </table>
+                
+                ${package.external_refs && package.external_refs.length > 0 ? `
+                <h6>External References</h6>
+                <ul class="list-unstyled">
+                    ${package.external_refs.map(ref => `
+                        <li><strong>${ref.category}:</strong> <a href="${ref.locator}" target="_blank">${ref.locator}</a></li>
+                    `).join('')}
+                </ul>
+                ` : ''}
+            </div>
+        </div>
+        
+        ${package.vulnerabilities && package.vulnerabilities.length > 0 ? `
+        <hr>
+        <h6>Vulnerabilities (${package.vulnerabilities.length})</h6>
+        <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Severity</th>
+                        <th>Title</th>
+                        <th>Fixed Version</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${package.vulnerabilities.map(vuln => `
+                        <tr>
+                            <td><a href="${vuln.primary_url}" target="_blank">${vuln.id}</a></td>
+                            <td><span class="badge badge-${vuln.severity === 'CRITICAL' ? 'danger' : vuln.severity === 'HIGH' ? 'warning' : 'info'}">${vuln.severity}</span></td>
+                            <td>${vuln.title}</td>
+                            <td><code>${vuln.fixed_version || 'N/A'}</code></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+        ` : '<p class="text-success mt-3"><i class="fas fa-check"></i> No vulnerabilities found for this package</p>'}
+    `;
+    
+    modal.show();
+}
+</script>
+
+<style>
+.badge-lg {
+    font-size: 1.2em;
+    padding: 0.5rem 1rem;
+}
+
+.license-chart {
+    font-size: 0.9em;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+.spinner-border {
+    width: 3rem;
+    height: 3rem;
+}
+
+.modal-lg {
+    max-width: 90%;
+}
+</style>
+{% endblock %}
