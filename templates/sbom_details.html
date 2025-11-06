@@ -23,9 +23,19 @@
                     <a href="/scan/{{ scan.id }}" class="btn btn-secondary">
                         <i class="fas fa-arrow-left"></i> Back to Scan
                     </a>
-                    <a href="/scan/{{ scan.id }}/sbom/export" class="btn btn-primary" target="_blank">
-                        <i class="fas fa-download"></i> Export SPDX
-                    </a>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-download"></i> Export
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="/scan/{{ scan.id }}/sbom/export" target="_blank">
+                                <i class="fas fa-file-alt"></i> SPDX Text Format
+                            </a></li>
+                            <li><a class="dropdown-item" href="/scan/{{ scan.id }}/sbom/export/json" target="_blank">
+                                <i class="fas fa-file-code"></i> JSON Format
+                            </a></li>
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>
