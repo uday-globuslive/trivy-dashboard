@@ -49,7 +49,7 @@ jobs:
           type=semver,pattern={{major}}.{{minor}}
           type=semver,pattern={{major}}
           type=raw,value=latest,enable={{is_default_branch}}
-          type=raw,value=ga-${{ github.run_number }}
+          type=raw,value=${{ github.ref_name }}-${{ github.run_number }}
         labels: |
           org.opencontainers.image.title=Trivy Security Dashboard
           org.opencontainers.image.description=Flask-based dashboard for visualizing Trivy security scan results from native Trivy JSON reports in Nexus Repository
