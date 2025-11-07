@@ -77,6 +77,18 @@
         </div>
     </div>
 
+    <!-- Additional Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h4 class="text-danger">{{ sbom.vulnerabilities.total_vulnerabilities }}</h4>
+                    <p class="mb-0">Total Vulnerabilities</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Vulnerability Summary -->
     {% if sbom.vulnerabilities.total_vulnerabilities > 0 %}
     <div class="row mb-4">
