@@ -108,7 +108,7 @@ def refresh_data_background():
                             'project': project_name,
                             'build_number': trivy_file['build_number'],
                             'branch_name': branch_name,
-                            'timestamp': trivy_file['timestamp'],
+                            'timestamp': parsed_data['metadata']['timestamp'],
                             'trivy_report_path': trivy_file['path'],
                             'vulnerabilities': parsed_data['vulnerabilities'],
                             'components': parsed_data['components'],
@@ -380,7 +380,7 @@ def project_detail(project_name):
     project_scans = [
         app_data['scans'][scan_id] for scan_id in project['scans']
     ]
-    project_scans.sort(key=lambda x: x['timestamp'], reverse=True)
+    project_scans.sort(key=lambda x: x['timestamp'] if x['timestamp'] else datetime.min, reverse=True)
     
     # Calculate trend data
     trend_data = analytics.calculate_vulnerability_trends(project_scans)
@@ -559,7 +559,7 @@ def api_project_charts(project_name):
     project_scans = [
         app_data['scans'][scan_id] for scan_id in project['scans']
     ]
-    project_scans.sort(key=lambda x: x['timestamp'])
+    project_scans.sort(key=lambda x: x['timestamp'] if x['timestamp'] else datetime.min)
     
     # Generate chart data
     chart_data = analytics.generate_chart_data(project_scans)
@@ -608,7 +608,7 @@ def api_metrics_trends():
     
     # Calculate trends across all projects
     all_scans = list(app_data['scans'].values())
-    all_scans.sort(key=lambda x: x['timestamp'])
+    all_scans.sort(key=lambda x: x['timestamp'] if x['timestamp'] else datetime.min)
     
     trends = analytics.calculate_security_trends(all_scans)
     

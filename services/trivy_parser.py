@@ -4,8 +4,9 @@ Trivy Report Parser for extracting vulnerability and component data from native 
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ class TrivyReportParser:
             'spec_version': str(trivy_content.get('SchemaVersion', 'unknown')),
             'serial_number': '',
             'version': 1,
-            'timestamp': self._parse_timestamp(trivy_content.get('CreatedAt')),
+            'timestamp': self._parse_timestamp(trivy_content.get('CreatedAt')) or datetime.now(),
             'project': self._extract_project_name(trivy_content),
             'project_version': self._extract_project_version(trivy_content),
             'project_type': 'container',  # Most Trivy scans are containers
@@ -256,11 +257,24 @@ class TrivyReportParser:
     # Helper methods for parsing specific data structures
     
     def _parse_timestamp(self, timestamp_str):
-        """Parse timestamp string to datetime object"""
+        """Parse timestamp string to datetime object with local timezone conversion"""
         if not timestamp_str:
             return None
             
         try:
+            # Handle nanosecond precision by truncating to microseconds
+            # Trivy timestamps can have nanoseconds like: 2025-11-06T05:21:49.462916502Z
+            # Python datetime only handles microseconds (6 digits)
+            if 'T' in timestamp_str and '.' in timestamp_str:
+                parts = timestamp_str.split('.')
+                if len(parts) == 2:
+                    # Get only first 6 digits after decimal (microseconds)
+                    fractional_part = parts[1].rstrip('Z')
+                    if len(fractional_part) > 6:
+                        fractional_part = fractional_part[:6]
+                    # Reconstruct with microseconds only
+                    timestamp_str = f"{parts[0]}.{fractional_part}Z"
+            
             # Handle different timestamp formats
             formats = [
                 '%Y-%m-%dT%H:%M:%S.%fZ',
@@ -269,16 +283,42 @@ class TrivyReportParser:
                 '%Y-%m-%d %H:%M:%S'
             ]
             
+            dt = None
             for fmt in formats:
                 try:
-                    return datetime.strptime(timestamp_str, fmt)
+                    dt = datetime.strptime(timestamp_str, fmt)
+                    break
                 except ValueError:
                     continue
             
-            logger.warning(f"⚠️ Could not parse timestamp: {timestamp_str}")
-            return None
+            if dt is None:
+                logger.warning(f"⚠️ Could not parse timestamp: {timestamp_str}")
+                return None
             
-        except Exception:
+            # If timestamp ends with 'Z', it's in UTC - convert to local timezone
+            if timestamp_str.endswith('Z'):
+                # Set UTC timezone on the naive datetime
+                utc_dt = dt.replace(tzinfo=timezone.utc)
+                # Convert to local timezone
+                local_tz = pytz.timezone('UTC')
+                try:
+                    # Try to get the system's local timezone
+                    import time
+                    if time.daylight:
+                        local_tz = pytz.timezone('UTC')
+                    # Convert UTC to local
+                    local_dt = utc_dt.astimezone()
+                    return local_dt.replace(tzinfo=None)  # Return naive datetime in local time
+                except Exception as e:
+                    logger.debug(f"Could not convert to local timezone: {e}")
+                    # If conversion fails, strip timezone and return as-is
+                    return dt
+            else:
+                # No timezone info, return as-is
+                return dt
+            
+        except Exception as e:
+            logger.debug(f"Exception in _parse_timestamp: {e}")
             return None
     
     def _extract_project_name(self, trivy_content: Dict[str, Any]) -> str:
