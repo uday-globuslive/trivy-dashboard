@@ -47,14 +47,19 @@ app_data = {
     'scans': {},
     'vulnerabilities': {},
     'last_updated': None,
-    'is_loading': False
+    'is_loading': False,
+    'force_refresh': False  # Flag to force immediate refresh
 }
 
 def refresh_data_background():
     """Background task to refresh data from Nexus"""
     while True:
         try:
-            if not app_data['is_loading']:
+            # Check if we should refresh: either on regular interval or forced refresh
+            should_refresh = not app_data['is_loading']
+            
+            if should_refresh or app_data['force_refresh']:
+                app_data['force_refresh'] = False  # Reset force refresh flag
                 logger.info("🔄 Starting background data refresh...")
                 app_data['is_loading'] = True
                 
@@ -619,9 +624,9 @@ def manual_refresh():
     """Manual data refresh endpoint"""
     logger.info("🔄 Manual data refresh requested")
     
-    if not app_data['is_loading']:
-        # Trigger immediate refresh by setting loading flag
-        app_data['is_loading'] = False
+    # Set force refresh flag to trigger immediate refresh in background thread
+    app_data['force_refresh'] = True
+    logger.info("✅ Force refresh flag set - data will be refreshed immediately")
         
     return jsonify({
         'status': 'refresh_triggered',
