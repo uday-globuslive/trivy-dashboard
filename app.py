@@ -51,6 +51,9 @@ app_data = {
     'force_refresh': False  # Flag to force immediate refresh
 }
 
+# Threading event for immediate refresh trigger
+refresh_event = threading.Event()
+
 def refresh_data_background():
     """Background task to refresh data from Nexus"""
     while True:
@@ -180,8 +183,9 @@ def refresh_data_background():
             logger.error(f"❌ Error in background data refresh: {str(e)}")
             app_data['is_loading'] = False
         
-        # Wait for next refresh cycle
-        time.sleep(Config.REFRESH_INTERVAL)
+        # Wait for next refresh cycle, but can be interrupted by refresh_event
+        refresh_event.wait(timeout=Config.REFRESH_INTERVAL)
+        refresh_event.clear()  # Clear the event for next use
 
 # Start background data refresh thread
 refresh_thread = threading.Thread(target=refresh_data_background, daemon=True)
@@ -624,9 +628,10 @@ def manual_refresh():
     """Manual data refresh endpoint"""
     logger.info("🔄 Manual data refresh requested")
     
-    # Set force refresh flag to trigger immediate refresh in background thread
+    # Set force refresh flag and trigger the refresh event to interrupt sleep
     app_data['force_refresh'] = True
-    logger.info("✅ Force refresh flag set - data will be refreshed immediately")
+    refresh_event.set()  # Signal the background thread to wake up immediately
+    logger.info("✅ Force refresh triggered - background thread awakened immediately")
         
     return jsonify({
         'status': 'refresh_triggered',
