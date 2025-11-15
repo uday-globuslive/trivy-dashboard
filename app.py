@@ -129,9 +129,12 @@ def refresh_data_background():
                         # Update project statistics with latest scan only
                         vuln_counts = analytics.count_vulnerabilities_by_severity(parsed_data['vulnerabilities'])
                         
+                        # Use the CreatedAt timestamp from Trivy report to determine latest scan
+                        scan_timestamp = parsed_data['metadata']['timestamp']
+                        
                         # Only update if this is the latest scan for this project
                         if (not projects[project_name]['last_scan'] or 
-                            trivy_file['timestamp'] > projects[project_name]['last_scan']):
+                            scan_timestamp > projects[project_name]['last_scan']):
                             projects[project_name]['critical_count'] = vuln_counts['critical']
                             projects[project_name]['high_count'] = vuln_counts['high']
                             projects[project_name]['medium_count'] = vuln_counts['medium']
@@ -143,8 +146,8 @@ def refresh_data_background():
                         
                         # Update last scan timestamp
                         if (not projects[project_name]['last_scan'] or 
-                            trivy_file['timestamp'] > projects[project_name]['last_scan']):
-                            projects[project_name]['last_scan'] = trivy_file['timestamp']
+                            scan_timestamp > projects[project_name]['last_scan']):
+                            projects[project_name]['last_scan'] = scan_timestamp
                         
                         # Store individual vulnerabilities
                         for vuln in parsed_data['vulnerabilities']:
