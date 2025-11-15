@@ -8,56 +8,103 @@ The Trivy Dashboard implements a sophisticated risk assessment system that quant
 
 The dashboard uses **dual calculation approaches** to provide accurate risk assessment across different contexts:
 
-### 1. Enhanced Analytics Method (CVSS Integration)
+### 1. Project-Level Risk Score (Severity Count Based)
 
-Located in `services/analytics.py`, this method provides sophisticated scoring with CVSS integration:
+Located in `utils/helpers.py`, this method is used for project-level aggregation based on the **latest scan** severity counts:
 
+**Severity Weights:**
+```
+Critical (C) = 10 points
+High (H)     = 7 points  
+Medium (M)   = 4 points
+Low (L)      = 1 point
+```
+
+**Calculation Formula:**
+```
+Total Weighted Score = (C × 10) + (H × 7) + (M × 4) + (L × 1)
+Max Possible Score = Total Vulnerabilities × 10
+Risk Score % = (Total Weighted Score / Max Possible Score) × 100
+```
+
+**Example Calculation:**
+```
+Latest Scan: 1 Critical, 49 High, 73 Medium, 15 Low
+
+Total Weighted = (1 × 10) + (49 × 7) + (73 × 4) + (15 × 1)
+               = 10 + 343 + 292 + 15
+               = 660
+
+Total Vulnerabilities = 1 + 49 + 73 + 15 = 138
+Max Possible Score = 138 × 10 = 1380
+
+Risk Score = (660 / 1380) × 100 = 47.83%
+```
+
+**Key Characteristics:**
+- Based on **latest scan data only** (determined by CreatedAt timestamp from Trivy report)
+- Simple and performant calculation
+- Easy to understand for stakeholders
+- Provides consistent scoring across projects
+- Only updated when new scans complete
+
+**Usage Context:**
+- Project overview statistics in dashboard
+- Project cards displaying risk percentage
+- Portfolio-level risk comparisons
+- Quick security posture assessment
+
+### 2. Enhanced Scan-Level Risk Score (CVSS Integration)
+
+Located in `services/analytics.py`, this method provides sophisticated scoring incorporating actual CVSS vulnerability scores:
+
+**Calculation Approach:**
 ```python
-# Severity weights with enhanced CVSS scoring
-severity_weights = {
-    'CRITICAL': 10,    # Highest impact
-    'HIGH': 7,         # High priority
-    'MEDIUM': 4,       # Moderate concern  
-    'LOW': 1,          # Low priority
-    'INFO': 0.5,       # Informational
-    'UNKNOWN': 2       # Default for unclassified
-}
+for each vulnerability in scan:
+    if CVSS_score exists:
+        weighted_score = (CVSS_score × severity_weight) / 10
+    else:
+        weighted_score = severity_weight
 
-# Enhanced calculation formula:
-if cvss_score:
-    weighted_score = (cvss_score * severity_weight / 10)
-else:
-    weighted_score = severity_weight
+total_weighted_score = sum(all weighted_scores)
+max_possible_score = total_vulnerabilities × 10
+risk_score = (total_weighted_score / max_possible_score) × 100
+risk_score = min(risk_score, 100)  # Cap at 100%
+```
 
-total_weighted_score = sum(weighted_score for each vulnerability)
-max_possible_score = total_vulnerabilities * 10  # Max CVSS is 10.0
-risk_percentage = (total_weighted_score / max_possible_score) * 100
+**Severity Weights:**
+```
+CRITICAL = 10
+HIGH     = 7
+MEDIUM   = 4
+LOW      = 1
+INFO     = 0.5
+UNKNOWN  = 2
 ```
 
 **Key Features:**
-- **CVSS Integration**: Uses actual CVSS scores (0.0-10.0) when available
-- **Fallback Weighting**: Uses severity weights when CVSS unavailable
-- **Proportional Scaling**: Higher CVSS scores increase risk impact
-- **Normalization**: All scores normalized to 0-100% scale
-
-### 2. Simplified Helper Method
-
-Located in `utils/helpers.py`, used for basic project-level scoring:
-
-```python
-# Direct weighted calculation
-total_weighted = (critical_count * 10) + (high_count * 7) + 
-                 (medium_count * 4) + (low_count * 1)
-
-max_possible_score = total_vulnerabilities * 10
-risk_percentage = (total_weighted / max_possible_score) * 100
-```
+- Incorporates actual CVSS scores (0.0-10.0) for granular analysis
+- Fallback to severity weights when CVSS unavailable
+- More accurate risk representation per individual vulnerability
+- Includes all vulnerabilities in detailed scan analysis
 
 **Usage Context:**
-- Project overview calculations
-- Quick risk comparisons
-- Performance-optimized scenarios
-- Legacy compatibility
+- Detailed scan vulnerability analysis
+- Per-vulnerability risk contribution analysis
+- Advanced analytics and reporting
+- Comparison of identical vulnerabilities across scans
+
+### Comparison of Methods
+
+| Aspect | Project-Level | Scan-Level |
+|--------|---------------|-----------|
+| **Data Source** | Latest scan severity counts | Full vulnerability list with CVSS |
+| **Input** | 4 counts (C, H, M, L) | Vulnerability objects |
+| **Calculation** | Severity weight × count | CVSS × severity weight / 10 |
+| **Precision** | Vulnerability class level | Individual CVSS score level |
+| **Performance** | Very fast (simple math) | Slower (iterates vulnerabilities) |
+| **Use Case** | Project overview | Detailed analysis |
+| **Update Trigger** | New scan complete | On-demand analysis |
 
 ## 📊 Risk Score Categories
 
@@ -344,7 +391,123 @@ print(f"Max possible score: {max_possible_score}")
 print(f"Final risk percentage: {risk_percentage}%")
 ```
 
-## 📚 Additional Resources
+## � Interactive Risk Calculation Info Modal
+
+### Overview
+
+An interactive **info icon** (ℹ️) has been added next to the "Risk Assessment" title on relevant pages. When clicked, it opens a detailed modal showing the complete risk calculation methodology, making it easy for product management and stakeholders to understand how risk scores are calculated.
+
+### Where the Modal Appears
+
+**1. Project View** (`/project/<project_name>`)
+- Location: Risk Assessment card header
+- Trigger: Click the blue ℹ️ info icon next to "Risk Assessment"
+- Content: Shows complete risk calculation formula and severity weights
+
+**2. Scan View** (`/scan/<scan_id>`)
+- Location: Scan Information section, next to Risk Score value
+- Trigger: Click the blue ℹ️ info icon next to the risk score percentage
+- Content: Same calculation details as project view
+
+### Modal Content Structure
+
+The modal displays four main sections:
+
+**📊 Methodology**
+- Explains that the risk score is based on vulnerability severity distribution
+- Describes the weighted scoring system normalized to 0-100%
+
+**⚖️ Severity Weights**
+- Visual display of weight assignments with color-coded badges:
+  - **Critical** = 10 points (red badge)
+  - **High** = 7 points (orange badge)
+  - **Medium** = 4 points (yellow badge)
+  - **Low** = 1 point (blue badge)
+
+**🧮 Formula**
+- Clear mathematical formula displayed in monospace font
+- Complete explanation of variables:
+  - Total Weighted Score = (Critical × 10) + (High × 7) + (Medium × 4) + (Low × 1)
+  - Max Possible Score = Total Vulnerabilities × 10
+
+**🚦 Risk Levels**
+- Classification table showing risk level thresholds:
+  - **CRITICAL**: 80-100% (red)
+  - **HIGH**: 60-79% (orange)
+  - **MEDIUM**: 40-59% (yellow)
+  - **LOW**: 20-39% (green)
+  - **MINIMAL**: 0-19% (blue)
+
+### Technical Implementation
+
+**Bootstrap 5 Compatibility**
+```html
+<!-- Trigger button -->
+<button class="btn btn-sm btn-link p-0" 
+        data-bs-toggle="modal" 
+        data-bs-target="#riskCalculationModal"
+        title="View risk calculation methodology">
+    <i class="fas fa-info-circle text-info"></i>
+</button>
+
+<!-- Modal -->
+<div class="modal fade" id="riskCalculationModal" tabindex="-1" 
+     aria-labelledby="riskCalculationModalLabel" aria-hidden="true">
+    <!-- Modal content -->
+</div>
+```
+
+**Key Features:**
+- Uses Bootstrap 5 syntax: `data-bs-toggle` and `data-bs-target`
+- Font Awesome 6.4.0 icons for visual appeal
+- Responsive design: adapts from mobile to desktop
+- Color-coded badge system for severity levels
+- Professional card-based layout with left borders
+
+### User Experience Benefits
+
+**For Product Management**
+1. Click info icon to understand risk percentage calculation
+2. See exact formula and severity weights applied
+3. Understand risk level classifications
+4. No need to access technical documentation
+
+**For Security Teams**
+- Quick access to calculation details without leaving current view
+- Faster decision-making and stakeholder communication
+- Consistent methodology reference across dashboard
+
+### Responsive Design
+
+The modal is fully responsive:
+- **Desktop**: Full-width modal with 2-column layout for risk levels
+- **Mobile**: Single-column layout with adjusted spacing and font sizes
+- **Tablet**: Optimized for mid-size screens with flexible grid
+
+### Files Modified
+
+- `templates/project.html` - Added info icon and modal to Risk Assessment card
+- `templates/scan.html` - Added info icon and modal to Risk Score display
+
+### Testing the Modal
+
+**On Project View:**
+1. Navigate to `/projects` page
+2. Click on any project card to view project details
+3. Look for the blue ℹ️ icon next to "Risk Assessment"
+4. Click the icon to open the modal
+5. Verify all content displays correctly
+6. Click "Close" button to dismiss
+
+**On Scan View:**
+1. Navigate to `/projects` page
+2. Click on any project
+3. Click on any scan to view scan details
+4. Look for the blue ℹ️ icon next to the risk score percentage
+5. Click the icon to open the modal
+6. Verify modal content and styling
+
+## �📚 Additional Resources
 
 - **CVSS Calculator**: [https://www.first.org/cvss/calculator/3.1](https://www.first.org/cvss/calculator/3.1)
 - **CycloneDX Vulnerability Schema**: [https://cyclonedx.org/](https://cyclonedx.org/)
