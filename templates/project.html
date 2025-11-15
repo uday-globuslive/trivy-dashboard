@@ -240,11 +240,15 @@
 // Vulnerability Trend Chart
 function renderVulnerabilityTrendChart() {
     const scans = {{ scans | tojson }};
-    console.log('Chart data - Scans received:', scans);
-    console.log('Number of scans:', scans ? scans.length : 0);
+    
+    if (window.debugLog) {
+        window.debugLog(`Scans data type: ${typeof scans}`);
+        window.debugLog(`Scans is array: ${Array.isArray(scans)}`);
+        window.debugLog(`Scans length: ${scans ? scans.length : 'null'}`);
+    }
     
     if (!scans || scans.length === 0) {
-        console.warn('No scans data available');
+        if (window.debugLog) window.debugLog('ERROR: No scans data');
         document.getElementById('vulnerabilityTrendChart').innerHTML = `
             <div class="text-center py-5">
                 <i class="fas fa-chart-line fa-2x text-muted mb-3"></i>
@@ -254,12 +258,16 @@ function renderVulnerabilityTrendChart() {
         return;
     }
     
+    if (window.debugLog) window.debugLog(`Processing ${scans.length} scans`);
+    
     // Sort scans by timestamp
     const sortedScans = scans.sort((a, b) => {
         const dateA = new Date(a.timestamp);
         const dateB = new Date(b.timestamp);
         return dateA - dateB;
     });
+    
+    if (window.debugLog) window.debugLog(`After sort: first=${sortedScans[0]?.id}, last=${sortedScans[sortedScans.length-1]?.id}`);
     
     // Extract data for chart
     const labels = sortedScans.map(scan => {
@@ -287,21 +295,35 @@ function renderVulnerabilityTrendChart() {
         return count;
     });
     
-    console.log('Chart data extracted:');
-    console.log('  Labels:', labels);
-    console.log('  Critical:', criticalData);
-    console.log('  High:', highData);
-    console.log('  Medium:', mediumData);
-    console.log('  Low:', lowData);
+    if (window.debugLog) {
+        window.debugLog(`Data extracted - Critical sum: ${criticalData.reduce((a,b)=>a+b, 0)}`);
+        window.debugLog(`High sum: ${highData.reduce((a,b)=>a+b, 0)}, Medium: ${mediumData.reduce((a,b)=>a+b, 0)}`);
+    }
     
     // Clear placeholder and get canvas container
     const container = document.getElementById('vulnerabilityTrendChart');
+    if (!container) {
+        if (window.debugLog) window.debugLog('ERROR: Chart container not found');
+        return;
+    }
+    
     container.innerHTML = '<canvas id="vulnerabilityChart"></canvas>';
     
     // Create chart
     const ctx = document.getElementById('vulnerabilityChart');
-    if (ctx && window.Chart) {
-        console.log('Creating Chart.js chart...');
+    if (!ctx) {
+        if (window.debugLog) window.debugLog('ERROR: Canvas not created');
+        return;
+    }
+    
+    if (!window.Chart) {
+        if (window.debugLog) window.debugLog('ERROR: Chart.js not available');
+        return;
+    }
+    
+    if (window.debugLog) window.debugLog('Creating Chart.js chart...');
+    
+    try {
         new Chart(ctx, {
             type: 'line',
             data: {
@@ -370,9 +392,10 @@ function renderVulnerabilityTrendChart() {
                 }
             }
         });
-        console.log('Chart created successfully');
-    } else {
-        console.error('Chart context or Chart.js not available');
+        if (window.debugLog) window.debugLog('SUCCESS: Chart created!');
+    } catch (e) {
+        if (window.debugLog) window.debugLog(`ERROR creating chart: ${e.message}`);
+        console.error('Chart creation error:', e);
     }
 }
 
@@ -383,6 +406,22 @@ function refreshData() {
 
 // Add CSS for risk score circle
 document.addEventListener('DOMContentLoaded', function() {
+    // Debug logging to page
+    const debugDiv = document.createElement('div');
+    debugDiv.id = 'debug-log';
+    debugDiv.style.cssText = 'position: fixed; bottom: 10px; right: 10px; background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; font-size: 11px; font-family: monospace; max-width: 300px; max-height: 200px; overflow-y: auto; z-index: 9999; display: none;';
+    document.body.appendChild(debugDiv);
+    
+    window.debugLog = function(msg) {
+        debugDiv.style.display = 'block';
+        const p = document.createElement('div');
+        p.textContent = msg;
+        p.style.color = msg.includes('ERROR') ? 'red' : msg.includes('SUCCESS') ? 'green' : 'black';
+        debugDiv.appendChild(p);
+    };
+    
+    window.debugLog('DOM ready - starting chart render');
+    
     const style = document.createElement('style');
     style.textContent = `
         .risk-score-circle {
@@ -411,6 +450,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.head.appendChild(style);
     
     // Render vulnerability trend chart
+    window.debugLog('Calling renderVulnerabilityTrendChart...');
     renderVulnerabilityTrendChart();
 });
 </script>

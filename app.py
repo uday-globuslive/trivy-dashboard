@@ -394,6 +394,11 @@ def project_detail(project_name):
     ]
     project_scans.sort(key=lambda x: x['timestamp'] if x['timestamp'] else datetime.min, reverse=True)
     
+    logger.info(f"📊 Project scans count: {len(project_scans)}")
+    for i, scan in enumerate(project_scans[:3]):
+        vuln_count = len(scan.get('vulnerabilities', []))
+        logger.info(f"   Scan {i}: {vuln_count} vulnerabilities, timestamp: {scan.get('timestamp', 'N/A')}")
+    
     # Calculate trend data
     trend_data = analytics.calculate_vulnerability_trends(project_scans)
     
