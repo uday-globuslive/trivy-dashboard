@@ -262,7 +262,8 @@ function renderVulnerabilityTrendChart() {
     
     // Wait for Chart.js to be available
     if (!window.Chart) {
-        if (window.debugLog) window.debugLog('Waiting for Chart.js to load...');
+        if (window.debugLog) window.debugLog('Waiting for Chart.js...');
+        // Retry in 100ms
         setTimeout(renderVulnerabilityTrendChart, 100);
         return;
     }
@@ -410,13 +411,16 @@ function refreshData() {
 
 // Add CSS for risk score circle
 document.addEventListener('DOMContentLoaded', function() {
-    // Debug logging to page
+    // Debug logging to page - controlled by DEBUG_DASHBOARD env var
     const debugDiv = document.createElement('div');
     debugDiv.id = 'debug-log';
     debugDiv.style.cssText = 'position: fixed; bottom: 10px; right: 10px; background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; font-size: 11px; font-family: monospace; max-width: 300px; max-height: 200px; overflow-y: auto; z-index: 9999; display: none;';
     document.body.appendChild(debugDiv);
     
+    const debugEnabled = '{{ debug_mode }}' === 'true';
+    
     window.debugLog = function(msg) {
+        if (!debugEnabled) return;
         debugDiv.style.display = 'block';
         const p = document.createElement('div');
         p.textContent = msg;
@@ -454,7 +458,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.head.appendChild(style);
     
     // Render vulnerability trend chart
-    window.debugLog('Calling renderVulnerabilityTrendChart...');
+    window.debugLog('Starting chart rendering...');
     renderVulnerabilityTrendChart();
 });
 </script>

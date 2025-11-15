@@ -402,10 +402,14 @@ def project_detail(project_name):
     # Calculate trend data
     trend_data = analytics.calculate_vulnerability_trends(project_scans)
     
+    # Check for DEBUG_DASHBOARD environment variable
+    debug_mode = os.environ.get('DEBUG_DASHBOARD', '').lower() in ('true', '1', 'yes', 'on')
+    
     return render_template('project.html',
         project=project,
         scans=project_scans[:10],  # Last 10 scans
-        trend_data=trend_data
+        trend_data=trend_data,
+        debug_mode=debug_mode
     )
 
 @app.route('/scan/<scan_id>')
