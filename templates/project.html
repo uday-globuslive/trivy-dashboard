@@ -260,6 +260,15 @@ function renderVulnerabilityTrendChart() {
     
     if (window.debugLog) window.debugLog(`Processing ${scans.length} scans`);
     
+    // Wait for Chart.js to be available
+    if (!window.Chart) {
+        if (window.debugLog) window.debugLog('Waiting for Chart.js to load...');
+        setTimeout(renderVulnerabilityTrendChart, 100);
+        return;
+    }
+    
+    if (window.debugLog) window.debugLog('Chart.js available, proceeding...');
+    
     // Sort scans by timestamp
     const sortedScans = scans.sort((a, b) => {
         const dateA = new Date(a.timestamp);
@@ -313,11 +322,6 @@ function renderVulnerabilityTrendChart() {
     const ctx = document.getElementById('vulnerabilityChart');
     if (!ctx) {
         if (window.debugLog) window.debugLog('ERROR: Canvas not created');
-        return;
-    }
-    
-    if (!window.Chart) {
-        if (window.debugLog) window.debugLog('ERROR: Chart.js not available');
         return;
     }
     
