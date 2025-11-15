@@ -105,12 +105,8 @@
                 <h6 class="m-0 font-weight-bold text-primary">Security Trends</h6>
             </div>
             <div class="card-body">
-                <div id="vulnerabilityTrendChart" style="height: 400px;">
+                <div id="vulnerabilityTrendChart" style="height: 400px; position: relative;">
                     <!-- Chart will be populated by JavaScript -->
-                    <div class="text-center py-5">
-                        <i class="fas fa-chart-line fa-2x text-muted mb-3"></i>
-                        <p class="text-muted">Vulnerability trend chart will be displayed here</p>
-                    </div>
                 </div>
             </div>
         </div>
@@ -244,8 +240,11 @@
 // Vulnerability Trend Chart
 function renderVulnerabilityTrendChart() {
     const scans = {{ scans | tojson }};
+    console.log('Chart data - Scans received:', scans);
+    console.log('Number of scans:', scans ? scans.length : 0);
     
     if (!scans || scans.length === 0) {
+        console.warn('No scans data available');
         document.getElementById('vulnerabilityTrendChart').innerHTML = `
             <div class="text-center py-5">
                 <i class="fas fa-chart-line fa-2x text-muted mb-3"></i>
@@ -269,24 +268,40 @@ function renderVulnerabilityTrendChart() {
     });
     
     const criticalData = sortedScans.map(scan => {
-        return scan.vulnerabilities.filter(v => v.severity === 'CRITICAL').length;
+        const count = scan.vulnerabilities ? scan.vulnerabilities.filter(v => v.severity === 'CRITICAL').length : 0;
+        return count;
     });
     
     const highData = sortedScans.map(scan => {
-        return scan.vulnerabilities.filter(v => v.severity === 'HIGH').length;
+        const count = scan.vulnerabilities ? scan.vulnerabilities.filter(v => v.severity === 'HIGH').length : 0;
+        return count;
     });
     
     const mediumData = sortedScans.map(scan => {
-        return scan.vulnerabilities.filter(v => v.severity === 'MEDIUM').length;
+        const count = scan.vulnerabilities ? scan.vulnerabilities.filter(v => v.severity === 'MEDIUM').length : 0;
+        return count;
     });
     
     const lowData = sortedScans.map(scan => {
-        return scan.vulnerabilities.filter(v => v.severity === 'LOW').length;
+        const count = scan.vulnerabilities ? scan.vulnerabilities.filter(v => v.severity === 'LOW').length : 0;
+        return count;
     });
     
+    console.log('Chart data extracted:');
+    console.log('  Labels:', labels);
+    console.log('  Critical:', criticalData);
+    console.log('  High:', highData);
+    console.log('  Medium:', mediumData);
+    console.log('  Low:', lowData);
+    
+    // Clear placeholder and get canvas container
+    const container = document.getElementById('vulnerabilityTrendChart');
+    container.innerHTML = '<canvas id="vulnerabilityChart"></canvas>';
+    
     // Create chart
-    const ctx = document.getElementById('vulnerabilityTrendChart');
+    const ctx = document.getElementById('vulnerabilityChart');
     if (ctx && window.Chart) {
+        console.log('Creating Chart.js chart...');
         new Chart(ctx, {
             type: 'line',
             data: {
@@ -355,6 +370,9 @@ function renderVulnerabilityTrendChart() {
                 }
             }
         });
+        console.log('Chart created successfully');
+    } else {
+        console.error('Chart context or Chart.js not available');
     }
 }
 
