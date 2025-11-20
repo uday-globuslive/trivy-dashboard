@@ -226,6 +226,71 @@
                 </tbody>
             </table>
         </div>
+        
+        <!-- Pagination Controls -->
+        {% if total_pages > 1 %}
+        <div class="d-flex justify-content-between align-items-center mt-3">
+            <div>
+                <span class="text-muted">Showing {{ scans|length }} of {{ total_scans }} scans (Page {{ page }} of {{ total_pages }})</span>
+            </div>
+            <nav aria-label="Scan pagination">
+                <ul class="pagination mb-0">
+                    <!-- Previous Button -->
+                    <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+                        <a class="page-link" href="?page={{ page - 1 }}&per_page={{ per_page }}" {% if page <= 1 %}tabindex="-1" aria-disabled="true"{% endif %}>
+                            <i class="fas fa-chevron-left"></i> Previous
+                        </a>
+                    </li>
+                    
+                    <!-- Page Numbers -->
+                    {% set start_page = [1, page - 2]|max %}
+                    {% set end_page = [total_pages, page + 2]|min %}
+                    
+                    {% if start_page > 1 %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page=1&per_page={{ per_page }}">1</a>
+                        </li>
+                        {% if start_page > 2 %}
+                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                        {% endif %}
+                    {% endif %}
+                    
+                    {% for p in range(start_page, end_page + 1) %}
+                        <li class="page-item {% if p == page %}active{% endif %}">
+                            <a class="page-link" href="?page={{ p }}&per_page={{ per_page }}">{{ p }}</a>
+                        </li>
+                    {% endfor %}
+                    
+                    {% if end_page < total_pages %}
+                        {% if end_page < total_pages - 1 %}
+                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                        {% endif %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ total_pages }}&per_page={{ per_page }}">{{ total_pages }}</a>
+                        </li>
+                    {% endif %}
+                    
+                    <!-- Next Button -->
+                    <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+                        <a class="page-link" href="?page={{ page + 1 }}&per_page={{ per_page }}" {% if page >= total_pages %}tabindex="-1" aria-disabled="true"{% endif %}>
+                            Next <i class="fas fa-chevron-right"></i>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+            
+            <!-- Per Page Selector -->
+            <div class="form-group mb-0">
+                <select class="form-select form-select-sm" onchange="window.location.href='?page=1&per_page=' + this.value" style="width: auto;">
+                    <option value="10" {% if per_page == 10 %}selected{% endif %}>10 per page</option>
+                    <option value="25" {% if per_page == 25 %}selected{% endif %}>25 per page</option>
+                    <option value="50" {% if per_page == 50 %}selected{% endif %}>50 per page</option>
+                    <option value="100" {% if per_page == 100 %}selected{% endif %}>100 per page</option>
+                </select>
+            </div>
+        </div>
+        {% endif %}
+        
         {% else %}
         <div class="text-center py-4">
             <i class="fas fa-search fa-2x text-muted mb-3"></i>

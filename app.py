@@ -380,7 +380,7 @@ def projects():
 
 @app.route('/project/<project_name>')
 def project_detail(project_name):
-    """Individual project details"""
+    """Individual project details with pagination"""
     logger.info(f"📊 Rendering project detail for: {project_name}")
     
     if project_name not in app_data['projects']:
@@ -394,22 +394,36 @@ def project_detail(project_name):
     ]
     project_scans.sort(key=lambda x: x['timestamp'] if x['timestamp'] else datetime.min, reverse=True)
     
-    logger.info(f"📊 Project scans count: {len(project_scans)}")
-    for i, scan in enumerate(project_scans[:3]):
-        vuln_count = len(scan.get('vulnerabilities', []))
-        logger.info(f"   Scan {i}: {vuln_count} vulnerabilities, timestamp: {scan.get('timestamp', 'N/A')}")
+    # Get pagination parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
     
-    # Calculate trend data
-    trend_data = analytics.calculate_vulnerability_trends(project_scans)
+    # Calculate pagination
+    total_scans = len(project_scans)
+    total_pages = (total_scans + per_page - 1) // per_page
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    
+    # Get scans for current page
+    paginated_scans = project_scans[start_idx:end_idx]
+    
+    logger.info(f"📊 Project scans: Total={total_scans}, Page={page}/{total_pages}, Showing={len(paginated_scans)}")
+    
+    # Calculate trend data for current page only
+    trend_data = analytics.calculate_vulnerability_trends(paginated_scans)
     
     # Check for DEBUG_DASHBOARD environment variable
     debug_mode = os.environ.get('DEBUG_DASHBOARD', '').lower() in ('true', '1', 'yes', 'on')
     
     return render_template('project.html',
         project=project,
-        scans=project_scans[:10],  # Last 10 scans
+        scans=paginated_scans,
         trend_data=trend_data,
-        debug_mode=debug_mode
+        debug_mode=debug_mode,
+        page=page,
+        per_page=per_page,
+        total_scans=total_scans,
+        total_pages=total_pages
     )
 
 @app.route('/scan/<scan_id>')
