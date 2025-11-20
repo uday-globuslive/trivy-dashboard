@@ -42,6 +42,7 @@ class Config:
     # Dashboard settings
     MAX_SCANS_PER_PROJECT = int(os.environ.get('MAX_SCANS_PER_PROJECT', 50))
     VULNERABILITY_RETENTION_DAYS = int(os.environ.get('VULNERABILITY_RETENTION_DAYS', 90))
+    DEFAULT_PAGE_SIZE = int(os.environ.get('DEFAULT_PAGE_SIZE', 10))
     
     # Chart settings
     DEFAULT_CHART_THEME = os.environ.get('DEFAULT_CHART_THEME', 'plotly')

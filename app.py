@@ -396,7 +396,7 @@ def project_detail(project_name):
     
     # Get pagination parameters
     page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
+    per_page = request.args.get('per_page', Config.DEFAULT_PAGE_SIZE, type=int)
     
     # Calculate pagination
     total_scans = len(project_scans)
