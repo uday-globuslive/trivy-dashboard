@@ -97,6 +97,11 @@ class ComprehensiveSBOMParser:
         processed_packages = set()
         processed_targets = set()
         
+        # Add root filesystem package (matching Trivy's format)
+        artifact_name = self.trivy_data.get('ArtifactName', '.')
+        root_pkg = self._build_root_filesystem_package(artifact_name)
+        packages.append(root_pkg)
+        
         # Build CycloneDX lookup for license info
         cyclonedx_lookup = self._build_cyclonedx_lookup()
         
@@ -279,6 +284,43 @@ class ComprehensiveSBOMParser:
             'description': f'{result_class} package manifest',
         }
     
+    def _build_root_filesystem_package(self, artifact_name: str) -> Dict[str, Any]:
+        """
+        Build root filesystem package (the container for all other packages)
+        Matches Trivy's root package format
+        """
+        # Generate SPDX ID for filesystem
+        combined = artifact_name.encode()
+        hash_value = hashlib.md5(combined).hexdigest()[:16]
+        spdx_id = f"SPDXRef-Filesystem-{hash_value}"
+        
+        return {
+            'spdx_id': spdx_id,
+            'name': artifact_name,
+            'version': '',
+            'pkg_id': artifact_name,
+            'target_file': artifact_name,
+            'scan_type': 'filesystem',
+
+            'supplier': 'NOASSERTION',
+            'download_location': 'NONE',
+            'primary_purpose': 'SOURCE',
+            'verification_code': '',
+            'license_concluded': 'NOASSERTION',
+            'license_declared': 'NOASSERTION',
+            'copyright_text': 'NOASSERTION',
+            'files_analyzed': False,
+
+            'external_refs': [],
+            'vulnerabilities': [],
+
+            'purl': '',
+            'uid': '',
+            'component_type': 'filesystem',
+            'bom_ref': '',
+            'description': 'Root filesystem package',
+        }
+    
     def _format_vulnerability_info(self, vuln: Dict) -> Dict[str, Any]:
         """Format vulnerability information for display"""
         return {
@@ -440,26 +482,29 @@ class ComprehensiveSBOMParser:
     def _get_package_relationships(self) -> List[Dict[str, str]]:
         """Get package relationships (CONTAINS relationships)"""
         relationships = []
+        packages = self._get_all_packages()
         
-        # Document DESCRIBES the main component
+        # Get the root filesystem package SPDX ID
+        root_pkg = packages[0] if packages else None
+        if not root_pkg:
+            return relationships
+        
+        root_spdx_id = root_pkg['spdx_id']
+        
+        # Document DESCRIBES the filesystem package
         relationships.append({
             'source': 'SPDXRef-DOCUMENT',
             'type': 'DESCRIBES',
-            'target': 'SPDXRef-Filesystem-Main'
+            'target': root_spdx_id
         })
         
-        # Filesystem CONTAINS all packages
-        for result in self.trivy_data.get('Results', []):
-            for vuln in result.get('Vulnerabilities', []):
-                pkg_name = vuln.get('PkgName', '')
-                version = vuln.get('InstalledVersion', '')
-                spdx_id = self._generate_spdx_id(pkg_name, version)
-                
-                relationships.append({
-                    'source': 'SPDXRef-Filesystem-Main',
-                    'type': 'CONTAINS',
-                    'target': spdx_id
-                })
+        # Filesystem CONTAINS all other packages
+        for pkg in packages[1:]:  # Skip the root filesystem package itself
+            relationships.append({
+                'source': root_spdx_id,
+                'type': 'CONTAINS',
+                'target': pkg['spdx_id']
+            })
         
         return relationships
     
@@ -567,24 +612,32 @@ class ComprehensiveSBOMParser:
             if pkg.get('version'):
                 spdx_lines.append(f"PackageVersion: {pkg['version']}")
             
+            # For APPLICATION packages (FilesAnalyzed: false), use minimal format like Trivy
+            is_application_pkg = pkg.get('files_analyzed') is False
+            
+            if not is_application_pkg:
+                # Full format for library packages
+                spdx_lines.append(f"PackageSupplier: {pkg['supplier']}")
+            
             spdx_lines.extend([
-                f"PackageSupplier: {pkg['supplier']}",
                 f"PackageDownloadLocation: {pkg['download_location']}",
                 f"PrimaryPackagePurpose: {pkg['primary_purpose']}",
             ])
             
             # Add FilesAnalyzed field for APPLICATION packages
-            if pkg.get('files_analyzed') is False:
+            if is_application_pkg:
                 spdx_lines.append("FilesAnalyzed: false")
             elif pkg.get('verification_code'):
                 # Only add verification code if files were analyzed
                 spdx_lines.append(f"PackageVerificationCode: {pkg['verification_code']}")
             
-            spdx_lines.extend([
-                f"PackageLicenseConcluded: {pkg['license_concluded']}",
-                f"PackageLicenseDeclared: {pkg['license_declared']}",
-                f"PackageCopyrightText: {pkg['copyright_text']}",
-            ])
+            # License and copyright info only for non-APPLICATION packages
+            if not is_application_pkg:
+                spdx_lines.extend([
+                    f"PackageLicenseConcluded: {pkg['license_concluded']}",
+                    f"PackageLicenseDeclared: {pkg['license_declared']}",
+                    f"PackageCopyrightText: {pkg['copyright_text']}",
+                ])
             
             # External references
             for ref in pkg.get('external_refs', []):
