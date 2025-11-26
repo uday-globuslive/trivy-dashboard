@@ -95,6 +95,7 @@ class ComprehensiveSBOMParser:
         """
         packages = []
         processed_packages = set()
+        processed_targets = set()
         
         # Build CycloneDX lookup for license info
         cyclonedx_lookup = self._build_cyclonedx_lookup()
@@ -103,20 +104,32 @@ class ComprehensiveSBOMParser:
         for result in self.trivy_data.get('Results', []):
             target = result.get('Target', 'unknown')
             result_type = result.get('Type', 'unknown')
+            result_class = result.get('Class', 'unknown')
             
-            # Process vulnerabilities to get package info
-            for vuln in result.get('Vulnerabilities', []):
-                pkg_name = vuln.get('PkgName', '')
-                version = vuln.get('InstalledVersion', '')
-                
-                if not pkg_name or (pkg_name, version) in processed_packages:
-                    continue
-                
-                package_info = self._build_comprehensive_package_info(
-                    vuln, target, result_type, cyclonedx_lookup
+            # Process vulnerabilities to get package info (if any)
+            vulnerabilities = result.get('Vulnerabilities', [])
+            if vulnerabilities:
+                for vuln in vulnerabilities:
+                    pkg_name = vuln.get('PkgName', '')
+                    version = vuln.get('InstalledVersion', '')
+                    
+                    if not pkg_name or (pkg_name, version) in processed_packages:
+                        continue
+                    
+                    package_info = self._build_comprehensive_package_info(
+                        vuln, target, result_type, cyclonedx_lookup
+                    )
+                    packages.append(package_info)
+                    processed_packages.add((pkg_name, version))
+            
+            # Also add APPLICATION packages for each target (pom.xml, package.json, etc.)
+            # even if they don't have vulnerabilities
+            if target not in processed_targets and result_class == 'lang-pkgs':
+                app_package = self._build_application_package_from_target(
+                    target, result_type, result_class
                 )
-                packages.append(package_info)
-                processed_packages.add((pkg_name, version))
+                packages.append(app_package)
+                processed_targets.add(target)
         
         # Add packages from CycloneDX that don't have vulnerabilities
         for component in self.cyclonedx_data.get('components', []):
@@ -229,6 +242,41 @@ class ComprehensiveSBOMParser:
             'component_type': component.get('type', 'library'),
             'bom_ref': component.get('bom-ref', ''),
             'description': component.get('description', ''),
+        }
+    
+    def _build_application_package_from_target(self, target: str, result_type: str, result_class: str) -> Dict[str, Any]:
+        """
+        Build APPLICATION package from Trivy target (e.g., pom.xml files)
+        This ensures all targets are included in SPDX even without vulnerabilities
+        """
+        # Generate SPDX ID from target path
+        spdx_id = self._generate_spdx_id_from_target(target, result_type)
+        
+        return {
+            'spdx_id': spdx_id,
+            'name': target,
+            'version': '',  # No version for application targets
+            'pkg_id': target,
+            'target_file': target,
+            'scan_type': result_type,
+            
+            'supplier': 'NOASSERTION',
+            'download_location': 'NONE',
+            'primary_purpose': 'APPLICATION',
+            'verification_code': '',  # Not required for FilesAnalyzed: false
+            'license_concluded': 'NOASSERTION',
+            'license_declared': 'NOASSERTION',
+            'copyright_text': 'NOASSERTION',
+            'files_analyzed': False,  # Mark as not analyzed
+            
+            'external_refs': [],
+            'vulnerabilities': [],
+            
+            'purl': '',
+            'uid': '',
+            'component_type': 'application',
+            'bom_ref': '',
+            'description': f'{result_class} package manifest',
         }
     
     def _format_vulnerability_info(self, vuln: Dict) -> Dict[str, Any]:
@@ -348,6 +396,13 @@ class ComprehensiveSBOMParser:
         combined = f"{pkg_name}-{version}".replace(':', '-').replace('/', '-')
         hash_value = hashlib.md5(combined.encode()).hexdigest()[:8]
         return f"SPDXRef-Package-{hash_value}"
+    
+    def _generate_spdx_id_from_target(self, target: str, result_type: str) -> str:
+        """Generate SPDX ID for application target (pom.xml, etc.)"""
+        # Match Trivy's format: SPDXRef-Application-<hash>
+        combined = f"{target}".encode()
+        hash_value = hashlib.md5(combined).hexdigest()[:16]
+        return f"SPDXRef-Application-{hash_value}"
     
     def _generate_verification_code(self, pkg_name: str, version: str) -> str:
         """Generate package verification code (SHA1 simulation)"""
@@ -506,11 +561,26 @@ class ComprehensiveSBOMParser:
                 "",
                 f"PackageName: {pkg['name']}",
                 f"SPDXID: {pkg['spdx_id']}",
-                f"PackageVersion: {pkg['version']}",
+            ])
+            
+            # Only add version if it exists (APPLICATION packages may not have version)
+            if pkg.get('version'):
+                spdx_lines.append(f"PackageVersion: {pkg['version']}")
+            
+            spdx_lines.extend([
                 f"PackageSupplier: {pkg['supplier']}",
                 f"PackageDownloadLocation: {pkg['download_location']}",
                 f"PrimaryPackagePurpose: {pkg['primary_purpose']}",
-                f"PackageVerificationCode: {pkg['verification_code']}",
+            ])
+            
+            # Add FilesAnalyzed field for APPLICATION packages
+            if pkg.get('files_analyzed') is False:
+                spdx_lines.append("FilesAnalyzed: false")
+            elif pkg.get('verification_code'):
+                # Only add verification code if files were analyzed
+                spdx_lines.append(f"PackageVerificationCode: {pkg['verification_code']}")
+            
+            spdx_lines.extend([
                 f"PackageLicenseConcluded: {pkg['license_concluded']}",
                 f"PackageLicenseDeclared: {pkg['license_declared']}",
                 f"PackageCopyrightText: {pkg['copyright_text']}",
