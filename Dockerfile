@@ -1,5 +1,5 @@
-# Use Python 3.11 slim image as base
-FROM python:3.11-slim
+# Use Python 3.12 slim image as base (latest stable with fewer vulnerabilities)
+FROM python:3.12-slim
 
 # Add metadata labels
 LABEL maintainer="Trivy Security Dashboard" \
@@ -26,11 +26,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     NEXUS_TIMEOUT=30
 
 # Install system dependencies including curl for health check
-RUN apt-get update && apt-get install -y \
+# Update and upgrade all packages to patch OS-level vulnerabilities
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
     gcc \
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && apt-get clean && \
+    apt-get autoclean && \
+    apt-get autoremove -y
 
 # Copy requirements first for better caching
 COPY requirements.txt .
