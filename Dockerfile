@@ -27,23 +27,27 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install system dependencies including curl for health check
 # Update and upgrade all packages to patch OS-level vulnerabilities
-RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends \
+RUN apt update && \
+    apt upgrade -y && \
+    apt install -y --no-install-recommends \
     gcc \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean && \
-    apt-get autoclean && \
-    apt-get autoremove -y
+    && apt clean && \
+    apt autoclean && \
+    apt autoremove -y
+
+# Remove gcc after pip installation is complete (added later in build)
+# This reduces the final image size and attack surface
 
 # Copy requirements first for better caching
 COPY requirements.txt .
 
 # Install Python dependencies with updated pip
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+# Use --no-cache-dir to reduce image size and avoid stale wheels
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
@@ -54,7 +58,8 @@ RUN mkdir -p /app/logs
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' --uid 1001 appuser && \
     chown -R appuser:appuser /app && \
-    chmod -R 755 /app
+    chmod -R 755 /app && \
+    chmod u+w /app  # Allow user to write to app directory
 
 # Switch to non-root user
 USER appuser
