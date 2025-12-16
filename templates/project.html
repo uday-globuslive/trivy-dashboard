@@ -101,8 +101,15 @@
 <div class="row mb-4">
     <div class="col-xl-8 col-lg-7">
         <div class="card shadow mb-4">
-            <div class="card-header py-3">
+            <div class="card-header py-3 d-flex justify-content-between align-items-center">
                 <h6 class="m-0 font-weight-bold text-primary">Security Trends</h6>
+                <div class="d-flex align-items-center">
+                    <label for="branchFilter" class="me-2 mb-0 small text-muted">Branch/Environment:</label>
+                    <select id="branchFilter" class="form-select form-select-sm" style="width: auto; min-width: 150px;" onchange="filterByBranch()">
+                        <option value="all">All</option>
+                        <!-- Options will be populated by JavaScript -->
+                    </select>
+                </div>
             </div>
             <div class="card-body">
                 <div id="vulnerabilityTrendChart" style="height: 400px; position: relative;">
@@ -117,20 +124,26 @@
             <div class="card-header py-3">
                 <div class="d-flex justify-content-between align-items-center">
                     <h6 class="m-0 font-weight-bold text-primary">Risk Assessment</h6>
-                    <button class="btn btn-sm btn-link p-0" data-bs-toggle="modal" data-bs-target="#riskCalculationModal" title="View risk calculation methodology">
-                        <i class="fas fa-info-circle text-info" style="font-size: 1.2rem;"></i>
-                    </button>
+                    <div class="d-flex align-items-center">
+                        <select id="riskBranchFilter" class="form-select form-select-sm me-2" style="width: auto; min-width: 120px;" onchange="filterRiskByBranch()">
+                            <option value="all">All</option>
+                            <!-- Options will be populated by JavaScript -->
+                        </select>
+                        <button class="btn btn-sm btn-link p-0" data-bs-toggle="modal" data-bs-target="#riskCalculationModal" title="View risk calculation methodology">
+                            <i class="fas fa-info-circle text-info" style="font-size: 1.2rem;"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
             <div class="card-body">
                 <div class="text-center">
                     <div class="risk-score-circle mb-3">
-                        <div class="risk-score-value" style="color: {{ 'red' if project.risk_score >= 80 else 'orange' if project.risk_score >= 40 else 'green' }}">
+                        <div id="riskScoreValue" class="risk-score-value" style="color: {{ 'red' if project.risk_score >= 80 else 'orange' if project.risk_score >= 40 else 'green' }}">
                             {{ project.risk_score }}%
                         </div>
                     </div>
                     <h5>Risk Score</h5>
-                    <p class="text-muted">
+                    <p class="text-muted" id="riskLevelBadge">
                         {% if project.risk_score >= 80 %}
                             <span class="badge bg-danger">High Risk</span>
                         {% elif project.risk_score >= 40 %}
@@ -145,18 +158,18 @@
 
                 <div class="row text-center">
                     <div class="col-6">
-                        <div class="font-weight-bold">{{ project.scans|length }}</div>
+                        <div class="font-weight-bold" id="totalScansCount">{{ project.scans|length }}</div>
                         <small class="text-muted">Total Scans</small>
                     </div>
                     <div class="col-6">
-                        <div class="font-weight-bold">{{ project.total_vulnerabilities }}</div>
+                        <div class="font-weight-bold" id="totalVulnerabilitiesCount">{{ project.total_vulnerabilities }}</div>
                         <small class="text-muted">Total Vulnerabilities</small>
                     </div>
                 </div>
 
                 <hr>
 
-                <div class="text-center">
+                <div class="text-center" id="lastScanInfo">
                     <small class="text-muted">
                         <i class="fas fa-clock me-1"></i>
                         Last scan: 
@@ -174,8 +187,15 @@
 
 <!-- Recent Scans -->
 <div class="card shadow mb-4">
-    <div class="card-header py-3">
+    <div class="card-header py-3 d-flex justify-content-between align-items-center">
         <h6 class="m-0 font-weight-bold text-primary">Recent Scans</h6>
+        <div class="d-flex align-items-center">
+            <label for="tableBranchFilter" class="me-2 mb-0 small text-muted">Branch/Environment:</label>
+            <select id="tableBranchFilter" class="form-select form-select-sm" style="width: auto; min-width: 150px;" onchange="filterTableByBranch()">
+                <option value="all">All</option>
+                <!-- Options will be populated by JavaScript -->
+            </select>
+        </div>
     </div>
     <div class="card-body">
         {% if scans %}
@@ -185,7 +205,7 @@
                     <tr>
                         <th>Scan Date</th>
                         <th>Build Number</th>
-                        <th>Branch Name</th>
+                        <th>Branch/Environment</th>
                         <th>Critical</th>
                         <th>High</th>
                         <th>Medium</th>
@@ -302,9 +322,13 @@
 </div>
 
 <script>
+// Store all scans globally for filtering
+let allScans = [];
+let vulnerabilityChart = null;
+
 // Vulnerability Trend Chart
-function renderVulnerabilityTrendChart() {
-    const scans = {{ scans | tojson }};
+function renderVulnerabilityTrendChart(filteredScans = null) {
+    const scans = filteredScans || allScans;
     
     if (window.debugLog) {
         window.debugLog(`Scans data type: ${typeof scans}`);
@@ -317,7 +341,7 @@ function renderVulnerabilityTrendChart() {
         document.getElementById('vulnerabilityTrendChart').innerHTML = `
             <div class="text-center py-5">
                 <i class="fas fa-chart-line fa-2x text-muted mb-3"></i>
-                <p class="text-muted">No vulnerability data available for trends</p>
+                <p class="text-muted">No vulnerability data available for the selected branch</p>
             </div>
         `;
         return;
@@ -329,7 +353,7 @@ function renderVulnerabilityTrendChart() {
     if (!window.Chart) {
         if (window.debugLog) window.debugLog('Waiting for Chart.js...');
         // Retry in 100ms
-        setTimeout(renderVulnerabilityTrendChart, 100);
+        setTimeout(() => renderVulnerabilityTrendChart(filteredScans), 100);
         return;
     }
     
@@ -382,6 +406,12 @@ function renderVulnerabilityTrendChart() {
         return;
     }
     
+    // Destroy existing chart if it exists
+    if (vulnerabilityChart) {
+        vulnerabilityChart.destroy();
+        vulnerabilityChart = null;
+    }
+    
     container.innerHTML = '<canvas id="vulnerabilityChart"></canvas>';
     
     // Create chart
@@ -394,7 +424,7 @@ function renderVulnerabilityTrendChart() {
     if (window.debugLog) window.debugLog('Creating Chart.js chart...');
     
     try {
-        new Chart(ctx, {
+        vulnerabilityChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels,
@@ -474,8 +504,313 @@ function refreshData() {
     window.location.reload();
 }
 
+// Filter scans by selected branch
+function filterByBranch() {
+    const branchFilter = document.getElementById('branchFilter');
+    const selectedBranch = branchFilter.value;
+    
+    if (window.debugLog) window.debugLog(`Filtering by branch: ${selectedBranch}`);
+    
+    let filteredScans;
+    if (selectedBranch === 'all') {
+        filteredScans = allScans;
+    } else {
+        filteredScans = allScans.filter(scan => {
+            const scanBranch = scan.branch_name || 'not provided';
+            return scanBranch === selectedBranch;
+        });
+    }
+    
+    if (window.debugLog) window.debugLog(`Filtered scans count: ${filteredScans.length}`);
+    
+    renderVulnerabilityTrendChart(filteredScans);
+}
+
+// Populate branch filter dropdown
+function populateBranchFilter() {
+    const branchFilter = document.getElementById('branchFilter');
+    if (!branchFilter || !allScans) return;
+    
+    // Extract unique branches from scans
+    const branches = new Set();
+    allScans.forEach(scan => {
+        const branch = scan.branch_name || 'not provided';
+        branches.add(branch);
+    });
+    
+    // Sort branches alphabetically, but keep 'not provided' at the end
+    const sortedBranches = Array.from(branches).sort((a, b) => {
+        if (a === 'not provided') return 1;
+        if (b === 'not provided') return -1;
+        return a.localeCompare(b);
+    });
+    
+    // Clear existing options except "All"
+    branchFilter.innerHTML = '<option value="all">All</option>';
+    
+    // Add branch options
+    sortedBranches.forEach(branch => {
+        const option = document.createElement('option');
+        option.value = branch;
+        option.textContent = branch === 'not provided' ? 'Branch: not provided' : branch;
+        branchFilter.appendChild(option);
+    });
+    
+    if (window.debugLog) window.debugLog(`Populated ${sortedBranches.length} branches in filter`);
+}
+
+// Populate table branch filter dropdown
+function populateTableBranchFilter() {
+    const tableBranchFilter = document.getElementById('tableBranchFilter');
+    if (!tableBranchFilter || !allScans) return;
+    
+    // Extract unique branches from scans
+    const branches = new Set();
+    allScans.forEach(scan => {
+        const branch = scan.branch_name || 'not provided';
+        branches.add(branch);
+    });
+    
+    // Sort branches alphabetically, but keep 'not provided' at the end
+    const sortedBranches = Array.from(branches).sort((a, b) => {
+        if (a === 'not provided') return 1;
+        if (b === 'not provided') return -1;
+        return a.localeCompare(b);
+    });
+    
+    // Clear existing options except "All"
+    tableBranchFilter.innerHTML = '<option value="all">All</option>';
+    
+    // Add branch options
+    sortedBranches.forEach(branch => {
+        const option = document.createElement('option');
+        option.value = branch;
+        option.textContent = branch === 'not provided' ? 'Branch: not provided' : branch;
+        tableBranchFilter.appendChild(option);
+    });
+    
+    if (window.debugLog) window.debugLog(`Populated ${sortedBranches.length} branches in table filter`);
+}
+
+// Filter table by branch
+function filterTableByBranch() {
+    const selectedBranch = document.getElementById('tableBranchFilter').value;
+    const tableBody = document.querySelector('.table-responsive table tbody');
+    if (!tableBody) return;
+    
+    const rows = tableBody.querySelectorAll('tr');
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+        const branchCell = row.querySelector('td:nth-child(3)');
+        if (!branchCell) return;
+        
+        const branchBadge = branchCell.querySelector('.badge');
+        if (!branchBadge) return;
+        
+        const branchText = branchBadge.textContent.trim();
+        const isNotProvided = branchText.startsWith('Branch:') || branchBadge.classList.contains('bg-secondary');
+        const branchName = isNotProvided ? 'not provided' : branchText;
+        
+        if (selectedBranch === 'all') {
+            row.style.display = '';
+            visibleCount++;
+        } else if (branchName === selectedBranch) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+    
+    if (window.debugLog) window.debugLog(`Table filtered: ${visibleCount} rows visible for branch: ${selectedBranch}`);
+}
+
+// Populate risk assessment branch filter dropdown
+function populateRiskBranchFilter() {
+    const riskBranchFilter = document.getElementById('riskBranchFilter');
+    if (!riskBranchFilter || !allScans) return;
+    
+    // Extract unique branches from scans
+    const branches = new Set();
+    allScans.forEach(scan => {
+        const branch = scan.branch_name || 'not provided';
+        branches.add(branch);
+    });
+    
+    // Sort branches alphabetically, but keep 'not provided' at the end
+    const sortedBranches = Array.from(branches).sort((a, b) => {
+        if (a === 'not provided') return 1;
+        if (b === 'not provided') return -1;
+        return a.localeCompare(b);
+    });
+    
+    // Clear existing options except "All"
+    riskBranchFilter.innerHTML = '<option value="all">All</option>';
+    
+    // Add branch options
+    sortedBranches.forEach(branch => {
+        const option = document.createElement('option');
+        option.value = branch;
+        option.textContent = branch === 'not provided' ? 'Branch: not provided' : branch;
+        riskBranchFilter.appendChild(option);
+    });
+    
+    if (window.debugLog) window.debugLog(`Populated ${sortedBranches.length} branches in risk filter`);
+}
+
+// Filter risk assessment by branch
+function filterRiskByBranch() {
+    const selectedBranch = document.getElementById('riskBranchFilter').value;
+    
+    // Filter scans by branch
+    let filteredScans;
+    if (selectedBranch === 'all') {
+        filteredScans = allScans;
+    } else {
+        filteredScans = allScans.filter(scan => {
+            const branch = scan.branch_name || 'not provided';
+            return branch === selectedBranch;
+        });
+    }
+    
+    // Calculate risk score based on filtered scans
+    const riskData = calculateRiskScore(filteredScans);
+    
+    // Update the UI
+    updateRiskAssessmentUI(riskData);
+    
+    if (window.debugLog) window.debugLog(`Risk filtered for branch: ${selectedBranch}, score: ${riskData.riskScore}%`);
+}
+
+// Calculate risk score from scans - matches backend formula in utils/helpers.py
+function calculateRiskScore(scans) {
+    // Severity weights matching backend (utils/helpers.py calculate_risk_score)
+    const severityWeights = {
+        'CRITICAL': 10,
+        'HIGH': 7,
+        'MEDIUM': 4,
+        'LOW': 1
+    };
+    
+    let criticalCount = 0;
+    let highCount = 0;
+    let mediumCount = 0;
+    let lowCount = 0;
+    let lastScan = null;
+    
+    scans.forEach(scan => {
+        if (scan.vulnerabilities) {
+            scan.vulnerabilities.forEach(vuln => {
+                const severity = (vuln.severity || '').toUpperCase();
+                if (severity === 'CRITICAL') criticalCount++;
+                else if (severity === 'HIGH') highCount++;
+                else if (severity === 'MEDIUM') mediumCount++;
+                else if (severity === 'LOW') lowCount++;
+            });
+        }
+        
+        // Track latest scan
+        if (scan.timestamp) {
+            const scanDate = new Date(scan.timestamp);
+            if (!lastScan || scanDate > lastScan) {
+                lastScan = scanDate;
+            }
+        }
+    });
+    
+    const totalVulnerabilities = criticalCount + highCount + mediumCount + lowCount;
+    
+    // Calculate risk score using same formula as backend (utils/helpers.py)
+    // total_weighted = critical*10 + high*7 + medium*4 + low*1
+    // max_possible_score = total_vulnerabilities * 10 (assuming all could be critical)
+    // risk_score = (total_weighted / max_possible_score) * 100
+    let riskScore = 0;
+    if (totalVulnerabilities > 0) {
+        const totalWeighted = (
+            criticalCount * severityWeights['CRITICAL'] +
+            highCount * severityWeights['HIGH'] +
+            mediumCount * severityWeights['MEDIUM'] +
+            lowCount * severityWeights['LOW']
+        );
+        const maxPossibleScore = totalVulnerabilities * severityWeights['CRITICAL'];
+        riskScore = (totalWeighted / maxPossibleScore) * 100;
+        riskScore = Math.round(riskScore * 100) / 100; // Round to 2 decimal places
+    }
+    
+    return {
+        riskScore: riskScore,
+        totalScans: scans.length,
+        totalVulnerabilities: totalVulnerabilities,
+        criticalCount: criticalCount,
+        highCount: highCount,
+        mediumCount: mediumCount,
+        lowCount: lowCount,
+        lastScan: lastScan
+    };
+}
+
+// Update risk assessment UI with calculated data
+function updateRiskAssessmentUI(data) {
+    // Update risk score value and color
+    const riskScoreEl = document.getElementById('riskScoreValue');
+    if (riskScoreEl) {
+        riskScoreEl.textContent = data.riskScore + '%';
+        if (data.riskScore >= 80) {
+            riskScoreEl.style.color = 'red';
+        } else if (data.riskScore >= 40) {
+            riskScoreEl.style.color = 'orange';
+        } else {
+            riskScoreEl.style.color = 'green';
+        }
+    }
+    
+    // Update risk level badge
+    const riskBadgeEl = document.getElementById('riskLevelBadge');
+    if (riskBadgeEl) {
+        let badgeClass, badgeText;
+        if (data.riskScore >= 80) {
+            badgeClass = 'bg-danger';
+            badgeText = 'High Risk';
+        } else if (data.riskScore >= 40) {
+            badgeClass = 'bg-warning';
+            badgeText = 'Medium Risk';
+        } else {
+            badgeClass = 'bg-success';
+            badgeText = 'Low Risk';
+        }
+        riskBadgeEl.innerHTML = `<span class="badge ${badgeClass}">${badgeText}</span>`;
+    }
+    
+    // Update total scans count
+    const totalScansEl = document.getElementById('totalScansCount');
+    if (totalScansEl) {
+        totalScansEl.textContent = data.totalScans;
+    }
+    
+    // Update total vulnerabilities count
+    const totalVulnsEl = document.getElementById('totalVulnerabilitiesCount');
+    if (totalVulnsEl) {
+        totalVulnsEl.textContent = data.totalVulnerabilities;
+    }
+    
+    // Update last scan info
+    const lastScanEl = document.getElementById('lastScanInfo');
+    if (lastScanEl) {
+        let lastScanText = 'Never';
+        if (data.lastScan) {
+            const options = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' };
+            lastScanText = data.lastScan.toLocaleDateString('en-CA', options).replace(',', '');
+        }
+        lastScanEl.innerHTML = `<small class="text-muted"><i class="fas fa-clock me-1"></i>Last scan: ${lastScanText}</small>`;
+    }
+}
+
 // Add CSS for risk score circle
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize allScans from template data
+    allScans = {{ scans | tojson }};
+    
     // Debug logging to page - controlled by DEBUG_DASHBOARD env var
     const debugDiv = document.createElement('div');
     debugDiv.id = 'debug-log';
@@ -494,6 +829,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     
     window.debugLog('DOM ready - starting chart render');
+    window.debugLog(`Loaded ${allScans ? allScans.length : 0} scans`);
     
     const style = document.createElement('style');
     style.textContent = `
@@ -521,6 +857,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     `;
     document.head.appendChild(style);
+    
+    // Populate branch filter dropdowns
+    window.debugLog('Populating branch filters...');
+    populateBranchFilter();
+    populateTableBranchFilter();
+    populateRiskBranchFilter();
     
     // Render vulnerability trend chart
     window.debugLog('Starting chart rendering...');
