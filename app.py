@@ -16,6 +16,7 @@ import time
 
 # Import our custom services
 from services.nexus_client import NexusClient
+from services.jfrog_client import JFrogClient
 from services.trivy_parser import TrivyReportParser
 from services.analytics import SecurityAnalytics
 from services.hybrid_sbom_parser import HybridSBOMParser
@@ -35,11 +36,34 @@ app = Flask(__name__)
 app.config.from_object(Config)
 CORS(app)
 
+# Initialize artifactory client based on configuration
+def create_artifactory_client():
+    """Factory function to create the appropriate artifactory client"""
+    if Config.ARTIFACTORY_TYPE == 'jfrog':
+        logger.info(f"🔧 Initializing JFrog Artifactory client")
+        return JFrogClient(
+            Config.JFROG_URL,
+            Config.JFROG_USERNAME,
+            Config.JFROG_PASSWORD,
+            Config.JFROG_REPOSITORY
+        )
+    else:  # default to nexus
+        logger.info(f"🔧 Initializing Nexus Repository client")
+        return NexusClient(
+            Config.NEXUS_URL,
+            Config.NEXUS_USERNAME,
+            Config.NEXUS_PASSWORD,
+            Config.NEXUS_REPOSITORY
+        )
+
 # Initialize services
-nexus_client = NexusClient(Config.NEXUS_URL, Config.NEXUS_USERNAME, Config.NEXUS_PASSWORD, Config.NEXUS_REPOSITORY)
+artifactory_client = create_artifactory_client()
 trivy_parser = TrivyReportParser()
 analytics = SecurityAnalytics()
 cache_manager = CacheManager()
+
+# Maintain backward compatibility - nexus_client is now artifactory_client
+nexus_client = artifactory_client
 
 # Global data store (acts as in-memory database)
 app_data = {
@@ -196,11 +220,30 @@ refresh_thread.start()
 
 @app.route('/debug/nexus')
 def debug_nexus():
-    """Debug endpoint to inspect Nexus connection and Trivy report discovery"""
-    logger.info("🔧 Debug: Nexus connection and Trivy report discovery")
+    """Debug endpoint to inspect Artifactory connection and Trivy report discovery"""
+    logger.info("🔧 Debug: Artifactory connection and Trivy report discovery")
     
-    debug_info = {
-        'nexus_config': {
+    # Build config based on artifactory type
+    if Config.ARTIFACTORY_TYPE == 'jfrog':
+        artifactory_config = {
+            'type': 'jfrog',
+            'url': Config.JFROG_URL,
+            'repository': Config.JFROG_REPOSITORY,
+            'username': Config.JFROG_USERNAME,
+            'group_id': Config.JFROG_GROUP_ID,
+            'artifact_suffix': Config.JFROG_ARTIFACT_SUFFIX,
+            'version_prefix': Config.JFROG_VERSION_PREFIX,
+            'asset_extension': Config.JFROG_ASSET_EXTENSION
+        }
+        api_tests = {
+            'ping': f"{Config.JFROG_URL}/artifactory/api/system/ping",
+            'repositories': f"{Config.JFROG_URL}/artifactory/api/repositories",
+            'repository_info': f"{Config.JFROG_URL}/artifactory/api/repositories/{Config.JFROG_REPOSITORY}",
+            'browse_repo': f"{Config.JFROG_URL}/artifactory/{Config.JFROG_REPOSITORY}/"
+        }
+    else:  # nexus
+        artifactory_config = {
+            'type': 'nexus',
             'url': Config.NEXUS_URL,
             'repository': Config.NEXUS_REPOSITORY,
             'username': Config.NEXUS_USERNAME,
@@ -208,7 +251,17 @@ def debug_nexus():
             'artifact_suffix': Config.NEXUS_ARTIFACT_SUFFIX,
             'version_prefix': Config.NEXUS_VERSION_PREFIX,
             'asset_extension': Config.NEXUS_ASSET_EXTENSION
-        },
+        }
+        api_tests = {
+            'status': f"{Config.NEXUS_URL}/service/rest/v1/status",
+            'repositories': f"{Config.NEXUS_URL}/service/rest/v1/repositories",
+            'search_assets': f"{Config.NEXUS_URL}/service/rest/v1/search/assets",
+            'repository_info': f"{Config.NEXUS_URL}/service/rest/v1/repositories/{Config.NEXUS_REPOSITORY}",
+            'browse_repo': f"{Config.NEXUS_URL}/repository/{Config.NEXUS_REPOSITORY}/com/mccamish/"
+        }
+    
+    debug_info = {
+        'artifactory_config': artifactory_config,
         'connection_test': False,
         'trivy_files': [],
         'error_message': None,
@@ -220,15 +273,6 @@ def debug_nexus():
     try:
         # Test basic connection
         debug_info['connection_test'] = nexus_client.test_connection()
-        
-        # Test various API endpoints
-        api_tests = {
-            'status': f"{Config.NEXUS_URL}/service/rest/v1/status",
-            'repositories': f"{Config.NEXUS_URL}/service/rest/v1/repositories",
-            'search_assets': f"{Config.NEXUS_URL}/service/rest/v1/search/assets",
-            'repository_info': f"{Config.NEXUS_URL}/service/rest/v1/repositories/{Config.NEXUS_REPOSITORY}",
-            'browse_repo': f"{Config.NEXUS_URL}/repository/{Config.NEXUS_REPOSITORY}/com/mccamish/"
-        }
         
         debug_info['api_endpoints'] = api_tests
         
@@ -671,7 +715,8 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'nexus_connection': nexus_client.test_connection(),
+        'artifactory_type': Config.ARTIFACTORY_TYPE,
+        'artifactory_connection': nexus_client.test_connection(),
         'data_available': len(app_data['projects']) > 0
     })
 
@@ -1124,11 +1169,11 @@ if __name__ == '__main__':
     logger.info(f"🔧 Debug endpoint: http://localhost:{Config.PORT}/debug/nexus")
     
     # Test initial connection
-    logger.info("🔗 Testing Nexus connection...")
+    logger.info(f"🔗 Testing {Config.ARTIFACTORY_TYPE.upper()} connection...")
     if nexus_client.test_connection():
-        logger.info("✅ Nexus connection successful")
+        logger.info(f"✅ {Config.ARTIFACTORY_TYPE.upper()} connection successful")
     else:
-        logger.warning("⚠️ Nexus connection failed - check configuration")
+        logger.warning(f"⚠️ {Config.ARTIFACTORY_TYPE.upper()} connection failed - check configuration")
     
     logger.info("📥 Background data refresh started...")
     
