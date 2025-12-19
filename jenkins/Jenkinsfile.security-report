@@ -1,0 +1,241 @@
+/**
+ * Jenkins Pipeline: Security Report Generator
+ * 
+ * This pipeline generates a PDF security report from the Trivy Dashboard
+ * and sends it via email using the Email-ext plugin.
+ * 
+ * Prerequisites:
+ * - Email-ext plugin installed in Jenkins
+ * - SMTP configured in Jenkins (Manage Jenkins > Configure System > Extended E-mail Notification)
+ * - Trivy Dashboard running and accessible from Jenkins agent
+ * 
+ * Parameters:
+ * - EMAIL_RECIPIENTS: Comma-separated email addresses
+ * - DASHBOARD_URL: Trivy Dashboard base URL
+ * - TIMEZONE: Timezone for report dates
+ * - REPORT_NAME: Custom report filename prefix
+ */
+
+pipeline {
+    agent any
+    
+    parameters {
+        string(
+            name: 'EMAIL_RECIPIENTS',
+            defaultValue: '',
+            description: 'Comma-separated email addresses to send the report (e.g., user1@company.com,user2@company.com)'
+        )
+        string(
+            name: 'DASHBOARD_URL',
+            defaultValue: 'http://localhost:5000',
+            description: 'Trivy Dashboard URL (e.g., http://trivy-dashboard.company.com:5000)'
+        )
+        choice(
+            name: 'TIMEZONE',
+            choices: ['Asia/Kolkata', 'UTC', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Tokyo', 'Australia/Sydney'],
+            description: 'Timezone for dates in the report'
+        )
+        string(
+            name: 'REPORT_NAME',
+            defaultValue: 'Security_Vulnerability_Report',
+            description: 'Custom report filename prefix'
+        )
+        booleanParam(
+            name: 'ATTACH_REPORT',
+            defaultValue: true,
+            description: 'Attach PDF report to email'
+        )
+    }
+    
+    environment {
+        REPORT_FILENAME = "${params.REPORT_NAME}_${new Date().format('yyyyMMdd_HHmmss')}.pdf"
+    }
+    
+    stages {
+        stage('Validate Parameters') {
+            steps {
+                script {
+                    if (!params.EMAIL_RECIPIENTS?.trim()) {
+                        error("EMAIL_RECIPIENTS parameter is required. Please provide at least one email address.")
+                    }
+                    
+                    echo "📧 Email Recipients: ${params.EMAIL_RECIPIENTS}"
+                    echo "🌐 Dashboard URL: ${params.DASHBOARD_URL}"
+                    echo "🕐 Timezone: ${params.TIMEZONE}"
+                    echo "📄 Report Name: ${env.REPORT_FILENAME}"
+                }
+            }
+        }
+        
+        stage('Check Dashboard Health') {
+            steps {
+                script {
+                    echo "🔍 Checking Trivy Dashboard health..."
+                    
+                    def healthResponse = sh(
+                        script: """
+                            curl -s -o /dev/null -w '%{http_code}' \
+                                --connect-timeout 10 \
+                                --max-time 30 \
+                                "${params.DASHBOARD_URL}/api/health"
+                        """,
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (healthResponse != '200') {
+                        error("❌ Trivy Dashboard is not healthy. HTTP Status: ${healthResponse}")
+                    }
+                    
+                    echo "✅ Trivy Dashboard is healthy"
+                }
+            }
+        }
+        
+        stage('Generate PDF Report') {
+            steps {
+                script {
+                    echo "📊 Generating security report..."
+                    
+                    def apiUrl = "${params.DASHBOARD_URL}/api/report/projects/pdf?timezone=${params.TIMEZONE}"
+                    
+                    sh """
+                        curl -f -s -S \
+                            --connect-timeout 30 \
+                            --max-time 120 \
+                            -o "${env.REPORT_FILENAME}" \
+                            "${apiUrl}"
+                    """
+                    
+                    // Verify the file was created and has content
+                    def fileSize = sh(
+                        script: "stat -c%s '${env.REPORT_FILENAME}' 2>/dev/null || echo '0'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (fileSize == '0' || fileSize == '') {
+                        error("❌ Failed to generate PDF report - file is empty or not created")
+                    }
+                    
+                    echo "✅ PDF report generated: ${env.REPORT_FILENAME} (${fileSize} bytes)"
+                }
+            }
+        }
+        
+        stage('Send Email Report') {
+            steps {
+                script {
+                    echo "📧 Sending report to: ${params.EMAIL_RECIPIENTS}"
+                    
+                    def currentDate = new Date().format('yyyy-MM-dd')
+                    def emailSubject = "Security Vulnerability Report - ${currentDate}"
+                    
+                    def emailBody = """
+                        <html>
+                        <head>
+                            <style>
+                                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                                .header { background-color: #1a237e; color: white; padding: 20px; text-align: center; }
+                                .content { padding: 20px; }
+                                .info-box { background-color: #f5f5f5; border-left: 4px solid #1a237e; padding: 15px; margin: 15px 0; }
+                                .footer { background-color: #f5f5f5; padding: 15px; text-align: center; font-size: 12px; color: #666; }
+                                table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+                                th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+                                th { background-color: #1a237e; color: white; }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="header">
+                                <h1>🔒 Security Vulnerability Report</h1>
+                            </div>
+                            <div class="content">
+                                <p>Hello,</p>
+                                <p>Please find attached the latest security vulnerability report generated from the Trivy Security Dashboard.</p>
+                                
+                                <div class="info-box">
+                                    <h3>📋 Report Details</h3>
+                                    <table>
+                                        <tr><th>Parameter</th><th>Value</th></tr>
+                                        <tr><td>Report Date</td><td>${currentDate}</td></tr>
+                                        <tr><td>Timezone</td><td>${params.TIMEZONE}</td></tr>
+                                        <tr><td>Dashboard URL</td><td>${params.DASHBOARD_URL}</td></tr>
+                                        <tr><td>Report File</td><td>${env.REPORT_FILENAME}</td></tr>
+                                        <tr><td>Generated By</td><td>Jenkins Pipeline</td></tr>
+                                        <tr><td>Build Number</td><td>${env.BUILD_NUMBER}</td></tr>
+                                    </table>
+                                </div>
+                                
+                                <p><strong>Report Contents:</strong></p>
+                                <ul>
+                                    <li>Summary of all projects with vulnerability counts</li>
+                                    <li>Risk scores for each project</li>
+                                    <li>Branch/Environment breakdown</li>
+                                    <li>Critical, High, Medium, and Low severity counts</li>
+                                    <li>Latest scan dates</li>
+                                </ul>
+                                
+                                <p>For detailed analysis and drill-down capabilities, please visit the <a href="${params.DASHBOARD_URL}">Trivy Security Dashboard</a>.</p>
+                                
+                                <p>Best regards,<br/>Security Automation Team</p>
+                            </div>
+                            <div class="footer">
+                                <p>This is an automated email from Jenkins. Please do not reply to this email.</p>
+                                <p>Build: ${env.JOB_NAME} #${env.BUILD_NUMBER}</p>
+                            </div>
+                        </body>
+                        </html>
+                    """
+                    
+                    if (params.ATTACH_REPORT) {
+                        emailext(
+                            to: params.EMAIL_RECIPIENTS,
+                            subject: emailSubject,
+                            body: emailBody,
+                            mimeType: 'text/html',
+                            attachmentsPattern: "${env.REPORT_FILENAME}",
+                            attachLog: false
+                        )
+                    } else {
+                        emailext(
+                            to: params.EMAIL_RECIPIENTS,
+                            subject: emailSubject,
+                            body: emailBody,
+                            mimeType: 'text/html',
+                            attachLog: false
+                        )
+                    }
+                    
+                    echo "✅ Email sent successfully to: ${params.EMAIL_RECIPIENTS}"
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "✅ Security report pipeline completed successfully"
+            cleanWs(cleanWhenSuccess: true, deleteDirs: true, patterns: [[pattern: '*.pdf', type: 'INCLUDE']])
+        }
+        failure {
+            echo "❌ Security report pipeline failed"
+            emailext(
+                to: params.EMAIL_RECIPIENTS,
+                subject: "FAILED: Security Report Generation - ${new Date().format('yyyy-MM-dd')}",
+                body: """
+                    <html>
+                    <body>
+                        <h2>❌ Security Report Generation Failed</h2>
+                        <p>The security report pipeline failed to complete.</p>
+                        <p><strong>Build:</strong> ${env.JOB_NAME} #${env.BUILD_NUMBER}</p>
+                        <p><strong>Dashboard URL:</strong> ${params.DASHBOARD_URL}</p>
+                        <p>Please check the <a href="${env.BUILD_URL}console">Jenkins console output</a> for details.</p>
+                    </body>
+                    </html>
+                """,
+                mimeType: 'text/html'
+            )
+        }
+        always {
+            echo "📝 Pipeline execution completed"
+        }
+    }
+}
