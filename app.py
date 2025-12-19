@@ -1153,14 +1153,14 @@ def _convert_trivy_to_spdx_json(trivy_data, scan):
 @app.route('/api/report/projects/pdf')
 def export_projects_pdf():
     """
-    Export projects summary as PDF report.
+    Export projects summary as PDF report with all branches/environments.
     
     Query Parameters:
         timezone: Timezone for date display (default: 'Asia/Kolkata' for IST)
                   Examples: 'America/New_York', 'Europe/London', 'UTC'
     
     Returns:
-        PDF file download with projects summary
+        PDF file download with projects summary including all branch details
     """
     import io
     import pytz
@@ -1201,10 +1201,10 @@ def export_projects_pdf():
     doc = SimpleDocTemplate(
         buffer,
         pagesize=landscape(A4),
-        rightMargin=20*mm,
-        leftMargin=20*mm,
-        topMargin=20*mm,
-        bottomMargin=20*mm
+        rightMargin=15*mm,
+        leftMargin=15*mm,
+        topMargin=15*mm,
+        bottomMargin=15*mm
     )
     
     # Styles
@@ -1228,7 +1228,7 @@ def export_projects_pdf():
     header_style = ParagraphStyle(
         'TableHeader',
         parent=styles['Normal'],
-        fontSize=9,
+        fontSize=8,
         textColor=colors.white,
         alignment=TA_CENTER,
         fontName='Helvetica-Bold'
@@ -1236,14 +1236,28 @@ def export_projects_pdf():
     cell_style = ParagraphStyle(
         'TableCell',
         parent=styles['Normal'],
-        fontSize=8,
+        fontSize=7,
         alignment=TA_LEFT
     )
     cell_center_style = ParagraphStyle(
         'TableCellCenter',
         parent=styles['Normal'],
-        fontSize=8,
+        fontSize=7,
         alignment=TA_CENTER
+    )
+    project_name_style = ParagraphStyle(
+        'ProjectName',
+        parent=styles['Normal'],
+        fontSize=8,
+        alignment=TA_LEFT,
+        fontName='Helvetica-Bold'
+    )
+    branch_style = ParagraphStyle(
+        'BranchCell',
+        parent=styles['Normal'],
+        fontSize=7,
+        alignment=TA_LEFT,
+        leftIndent=10
     )
     
     # Build PDF content
@@ -1293,7 +1307,7 @@ def export_projects_pdf():
     elements.append(Spacer(1, 30))
     
     # Projects table header
-    elements.append(Paragraph("Projects Overview", styles['Heading2']))
+    elements.append(Paragraph("Projects Overview (with Branch/Environment Details)", styles['Heading2']))
     elements.append(Spacer(1, 10))
     
     # Sort projects by risk score (highest first)
@@ -1303,70 +1317,97 @@ def export_projects_pdf():
         reverse=True
     )
     
-    # Build projects table data
-    # Calculate branch/environment count for each project
+    # Build projects table data with sub-rows for each branch
     table_data = [[
         Paragraph('Project Name', header_style),
-        Paragraph('Branch/Env Count', header_style),
         Paragraph('Risk Score', header_style),
         Paragraph('Critical', header_style),
         Paragraph('High', header_style),
         Paragraph('Medium', header_style),
         Paragraph('Low', header_style),
-        Paragraph('Total Vulns', header_style),
-        Paragraph('Latest Scan Date', header_style),
-        Paragraph('Latest Branch/Env', header_style)
+        Paragraph('Total', header_style),
+        Paragraph('Latest Scan Date', header_style)
     ]]
+    
+    # Track row indices for styling
+    row_styles = []  # List of (row_index, is_project_row, risk_score, critical_count, high_count)
+    current_row = 1
     
     for project in sorted_projects:
         project_name = project.get('name', 'Unknown')
         
-        # Count unique branches/environments for this project
+        # Get all scans for this project
         project_scans = [app_data['scans'].get(scan_id) for scan_id in project.get('scans', [])]
         project_scans = [s for s in project_scans if s is not None]
         
-        branches = set()
+        # Group scans by branch/environment and get latest for each
+        branch_latest_scans = {}
         for scan in project_scans:
-            branch = scan.get('branch_name', 'not provided')
-            if branch:
-                branches.add(branch)
-        branch_count = len(branches) if branches else 0
+            branch = scan.get('branch_name') or 'not provided'
+            scan_timestamp = scan.get('timestamp') or datetime.min
+            
+            if branch not in branch_latest_scans:
+                branch_latest_scans[branch] = scan
+            else:
+                existing_timestamp = branch_latest_scans[branch].get('timestamp') or datetime.min
+                if scan_timestamp > existing_timestamp:
+                    branch_latest_scans[branch] = scan
         
-        # Get latest scan info
-        latest_scan = None
-        if project_scans:
-            project_scans_sorted = sorted(
-                project_scans, 
-                key=lambda x: x.get('timestamp') or datetime.min, 
-                reverse=True
-            )
-            latest_scan = project_scans_sorted[0] if project_scans_sorted else None
+        branch_count = len(branch_latest_scans)
         
-        latest_scan_date = format_datetime_tz(
-            latest_scan.get('timestamp') if latest_scan else None,
-            tz
-        )
-        latest_branch = latest_scan.get('branch_name', 'N/A') if latest_scan else 'N/A'
-        
-        # Risk score color
+        # Add project main row (aggregated totals)
         risk_score = project.get('risk_score', 0)
-        
-        row = [
-            Paragraph(project_name[:35] + ('...' if len(project_name) > 35 else ''), cell_style),
-            Paragraph(str(branch_count), cell_center_style),
-            Paragraph(f"{risk_score}%", cell_center_style),
-            Paragraph(str(project.get('critical_count', 0)), cell_center_style),
-            Paragraph(str(project.get('high_count', 0)), cell_center_style),
-            Paragraph(str(project.get('medium_count', 0)), cell_center_style),
-            Paragraph(str(project.get('low_count', 0)), cell_center_style),
-            Paragraph(str(project.get('total_vulnerabilities', 0)), cell_center_style),
-            Paragraph(latest_scan_date, cell_style),
-            Paragraph(str(latest_branch), cell_style)
+        project_row = [
+            Paragraph(f"<b>{project_name[:40]}</b>" + (f" ({branch_count})" if branch_count > 1 else ""), project_name_style),
+            Paragraph(f"<b>{risk_score}%</b>", cell_center_style),
+            Paragraph(f"<b>{project.get('critical_count', 0)}</b>", cell_center_style),
+            Paragraph(f"<b>{project.get('high_count', 0)}</b>", cell_center_style),
+            Paragraph(f"<b>{project.get('medium_count', 0)}</b>", cell_center_style),
+            Paragraph(f"<b>{project.get('low_count', 0)}</b>", cell_center_style),
+            Paragraph(f"<b>{project.get('total_vulnerabilities', 0)}</b>", cell_center_style),
+            Paragraph(format_datetime_tz(project.get('last_scan'), tz), cell_style)
         ]
-        table_data.append(row)
+        table_data.append(project_row)
+        row_styles.append((current_row, True, risk_score, project.get('critical_count', 0), project.get('high_count', 0)))
+        current_row += 1
+        
+        # Add sub-rows for each branch/environment
+        sorted_branches = sorted(branch_latest_scans.items(), 
+                                  key=lambda x: x[1].get('timestamp') or datetime.min, 
+                                  reverse=True)
+        
+        for branch_name, latest_scan in sorted_branches:
+            # Calculate vulnerability counts for this branch's latest scan
+            vulns = latest_scan.get('vulnerabilities', [])
+            branch_critical = len([v for v in vulns if v.get('severity', '').upper() == 'CRITICAL'])
+            branch_high = len([v for v in vulns if v.get('severity', '').upper() == 'HIGH'])
+            branch_medium = len([v for v in vulns if v.get('severity', '').upper() == 'MEDIUM'])
+            branch_low = len([v for v in vulns if v.get('severity', '').upper() == 'LOW'])
+            branch_total = len(vulns)
+            
+            # Calculate branch risk score
+            branch_risk = 0
+            if branch_total > 0:
+                total_weighted = (branch_critical * 10 + branch_high * 7 + branch_medium * 4 + branch_low * 1)
+                max_possible = branch_total * 10
+                branch_risk = round((total_weighted / max_possible) * 100, 2)
+            
+            branch_row = [
+                Paragraph(f"↳ {branch_name}", branch_style),
+                Paragraph(f"{branch_risk}%", cell_center_style),
+                Paragraph(str(branch_critical), cell_center_style),
+                Paragraph(str(branch_high), cell_center_style),
+                Paragraph(str(branch_medium), cell_center_style),
+                Paragraph(str(branch_low), cell_center_style),
+                Paragraph(str(branch_total), cell_center_style),
+                Paragraph(format_datetime_tz(latest_scan.get('timestamp'), tz), cell_style)
+            ]
+            table_data.append(branch_row)
+            row_styles.append((current_row, False, branch_risk, branch_critical, branch_high))
+            current_row += 1
     
-    # Create projects table - adjusted widths for full branch name display
-    col_widths = [95, 50, 40, 40, 40, 40, 40, 45, 95, 130]
+    # Create projects table
+    col_widths = [145, 50, 45, 45, 45, 45, 45, 125]
     projects_table = Table(table_data, colWidths=col_widths, repeatRows=1)
     
     # Table styling
@@ -1381,36 +1422,42 @@ def export_projects_pdf():
         ('TOPPADDING', (0, 0), (-1, 0), 8),
         
         # Body styling
-        ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
+        ('ALIGN', (1, 1), (-2, -1), 'CENTER'),
         ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+        ('ALIGN', (-1, 1), (-1, -1), 'LEFT'),
         ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
-        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        ('FONTSIZE', (0, 1), (-1, -1), 7),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+        ('TOPPADDING', (0, 1), (-1, -1), 4),
         
         # Grid
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
-        
-        # Alternating row colors
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
     ])
     
-    # Add conditional coloring for severity columns
-    for i, project in enumerate(sorted_projects, start=1):
-        # Critical column (index 3)
-        if project.get('critical_count', 0) > 0:
-            table_style.add('BACKGROUND', (3, i), (3, i), colors.HexColor('#ffcdd2'))
-        # High column (index 4)
-        if project.get('high_count', 0) > 0:
-            table_style.add('BACKGROUND', (4, i), (4, i), colors.HexColor('#ffe0b2'))
-        # Risk score coloring
-        risk_score = project.get('risk_score', 0)
-        if risk_score >= 80:
-            table_style.add('BACKGROUND', (2, i), (2, i), colors.HexColor('#ffcdd2'))
-        elif risk_score >= 40:
-            table_style.add('BACKGROUND', (2, i), (2, i), colors.HexColor('#ffe0b2'))
+    # Add conditional styling for each row
+    for row_idx, is_project, risk_score, critical_count, high_count in row_styles:
+        if is_project:
+            # Project main row - slightly darker background
+            table_style.add('BACKGROUND', (0, row_idx), (-1, row_idx), colors.HexColor('#e8eaf6'))
         else:
-            table_style.add('BACKGROUND', (2, i), (2, i), colors.HexColor('#c8e6c9'))
+            # Branch sub-row - white background
+            table_style.add('BACKGROUND', (0, row_idx), (-1, row_idx), colors.white)
+        
+        # Risk score coloring
+        if risk_score >= 80:
+            table_style.add('BACKGROUND', (1, row_idx), (1, row_idx), colors.HexColor('#ffcdd2'))
+        elif risk_score >= 40:
+            table_style.add('BACKGROUND', (1, row_idx), (1, row_idx), colors.HexColor('#ffe0b2'))
+        else:
+            table_style.add('BACKGROUND', (1, row_idx), (1, row_idx), colors.HexColor('#c8e6c9'))
+        
+        # Critical column highlighting
+        if critical_count > 0:
+            table_style.add('BACKGROUND', (2, row_idx), (2, row_idx), colors.HexColor('#ffcdd2'))
+        
+        # High column highlighting
+        if high_count > 0:
+            table_style.add('BACKGROUND', (3, row_idx), (3, row_idx), colors.HexColor('#ffe0b2'))
     
     projects_table.setStyle(table_style)
     elements.append(projects_table)
