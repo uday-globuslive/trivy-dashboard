@@ -1145,6 +1145,309 @@ def _convert_trivy_to_spdx_json(trivy_data, scan):
     
     return spdx_doc
 
+
+# ============================================================================
+# PDF Report Export API
+# ============================================================================
+
+@app.route('/api/report/projects/pdf')
+def export_projects_pdf():
+    """
+    Export projects summary as PDF report.
+    
+    Query Parameters:
+        timezone: Timezone for date display (default: 'Asia/Kolkata' for IST)
+                  Examples: 'America/New_York', 'Europe/London', 'UTC'
+    
+    Returns:
+        PDF file download with projects summary
+    """
+    import io
+    import pytz
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch, mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    
+    logger.info("📄 Generating PDF report for projects")
+    
+    # Get timezone parameter (default to IST)
+    tz_name = request.args.get('timezone', 'Asia/Kolkata')
+    try:
+        tz = pytz.timezone(tz_name)
+    except pytz.exceptions.UnknownTimeZoneError:
+        logger.warning(f"⚠️ Unknown timezone: {tz_name}, using Asia/Kolkata")
+        tz = pytz.timezone('Asia/Kolkata')
+    
+    # Helper function to format datetime in specified timezone
+    def format_datetime_tz(dt, timezone):
+        if dt is None:
+            return "Never"
+        try:
+            if dt.tzinfo is None:
+                dt = pytz.UTC.localize(dt)
+            local_dt = dt.astimezone(timezone)
+            return local_dt.strftime('%Y-%m-%d %H:%M:%S %Z')
+        except Exception as e:
+            logger.warning(f"⚠️ Error formatting datetime: {e}")
+            return str(dt)
+    
+    # Create PDF buffer
+    buffer = io.BytesIO()
+    
+    # Create PDF document in landscape mode for better table fit
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=20*mm,
+        bottomMargin=20*mm
+    )
+    
+    # Styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor('#1a237e')
+    )
+    subtitle_style = ParagraphStyle(
+        'CustomSubtitle',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=20,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor('#666666')
+    )
+    header_style = ParagraphStyle(
+        'TableHeader',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.white,
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold'
+    )
+    cell_style = ParagraphStyle(
+        'TableCell',
+        parent=styles['Normal'],
+        fontSize=8,
+        alignment=TA_LEFT
+    )
+    cell_center_style = ParagraphStyle(
+        'TableCellCenter',
+        parent=styles['Normal'],
+        fontSize=8,
+        alignment=TA_CENTER
+    )
+    
+    # Build PDF content
+    elements = []
+    
+    # Title
+    elements.append(Paragraph("Security Vulnerability Report", title_style))
+    
+    # Subtitle with generation time
+    report_time = datetime.now()
+    report_time_tz = pytz.UTC.localize(report_time).astimezone(tz)
+    elements.append(Paragraph(
+        f"Generated on: {report_time_tz.strftime('%Y-%m-%d %H:%M:%S %Z')}<br/>Timezone: {tz_name}",
+        subtitle_style
+    ))
+    
+    # Summary section
+    total_projects = len(app_data['projects'])
+    total_critical = sum(p.get('critical_count', 0) for p in app_data['projects'].values())
+    total_high = sum(p.get('high_count', 0) for p in app_data['projects'].values())
+    total_medium = sum(p.get('medium_count', 0) for p in app_data['projects'].values())
+    total_low = sum(p.get('low_count', 0) for p in app_data['projects'].values())
+    
+    summary_data = [
+        ['Total Projects', 'Critical', 'High', 'Medium', 'Low'],
+        [str(total_projects), str(total_critical), str(total_high), str(total_medium), str(total_low)]
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[80, 60, 60, 60, 60])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a237e')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('FONTSIZE', (0, 1), (-1, -1), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+        ('TOPPADDING', (0, 1), (-1, -1), 8),
+        ('BACKGROUND', (1, 1), (1, 1), colors.HexColor('#ffebee')),  # Critical - light red
+        ('BACKGROUND', (2, 1), (2, 1), colors.HexColor('#fff3e0')),  # High - light orange
+        ('BACKGROUND', (3, 1), (3, 1), colors.HexColor('#e3f2fd')),  # Medium - light blue
+        ('BACKGROUND', (4, 1), (4, 1), colors.HexColor('#e8f5e9')),  # Low - light green
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#cccccc')),
+    ]))
+    
+    elements.append(summary_table)
+    elements.append(Spacer(1, 30))
+    
+    # Projects table header
+    elements.append(Paragraph("Projects Overview", styles['Heading2']))
+    elements.append(Spacer(1, 10))
+    
+    # Sort projects by risk score (highest first)
+    sorted_projects = sorted(
+        app_data['projects'].values(),
+        key=lambda x: x.get('risk_score', 0),
+        reverse=True
+    )
+    
+    # Build projects table data
+    # Calculate branch/environment count for each project
+    table_data = [[
+        Paragraph('Project Name', header_style),
+        Paragraph('Branch/Env Count', header_style),
+        Paragraph('Risk Score', header_style),
+        Paragraph('Critical', header_style),
+        Paragraph('High', header_style),
+        Paragraph('Medium', header_style),
+        Paragraph('Low', header_style),
+        Paragraph('Total Vulns', header_style),
+        Paragraph('Latest Scan Date', header_style),
+        Paragraph('Latest Branch/Env', header_style)
+    ]]
+    
+    for project in sorted_projects:
+        project_name = project.get('name', 'Unknown')
+        
+        # Count unique branches/environments for this project
+        project_scans = [app_data['scans'].get(scan_id) for scan_id in project.get('scans', [])]
+        project_scans = [s for s in project_scans if s is not None]
+        
+        branches = set()
+        for scan in project_scans:
+            branch = scan.get('branch_name', 'not provided')
+            if branch:
+                branches.add(branch)
+        branch_count = len(branches) if branches else 0
+        
+        # Get latest scan info
+        latest_scan = None
+        if project_scans:
+            project_scans_sorted = sorted(
+                project_scans, 
+                key=lambda x: x.get('timestamp') or datetime.min, 
+                reverse=True
+            )
+            latest_scan = project_scans_sorted[0] if project_scans_sorted else None
+        
+        latest_scan_date = format_datetime_tz(
+            latest_scan.get('timestamp') if latest_scan else None,
+            tz
+        )
+        latest_branch = latest_scan.get('branch_name', 'N/A') if latest_scan else 'N/A'
+        
+        # Risk score color
+        risk_score = project.get('risk_score', 0)
+        
+        row = [
+            Paragraph(project_name[:35] + ('...' if len(project_name) > 35 else ''), cell_style),
+            Paragraph(str(branch_count), cell_center_style),
+            Paragraph(f"{risk_score}%", cell_center_style),
+            Paragraph(str(project.get('critical_count', 0)), cell_center_style),
+            Paragraph(str(project.get('high_count', 0)), cell_center_style),
+            Paragraph(str(project.get('medium_count', 0)), cell_center_style),
+            Paragraph(str(project.get('low_count', 0)), cell_center_style),
+            Paragraph(str(project.get('total_vulnerabilities', 0)), cell_center_style),
+            Paragraph(latest_scan_date, cell_style),
+            Paragraph(str(latest_branch), cell_style)
+        ]
+        table_data.append(row)
+    
+    # Create projects table - adjusted widths for full branch name display
+    col_widths = [95, 50, 40, 40, 40, 40, 40, 45, 95, 130]
+    projects_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+    
+    # Table styling
+    table_style = TableStyle([
+        # Header styling
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a237e')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('TOPPADDING', (0, 0), (-1, 0), 8),
+        
+        # Body styling
+        ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
+        ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        
+        # Grid
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+        
+        # Alternating row colors
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+    ])
+    
+    # Add conditional coloring for severity columns
+    for i, project in enumerate(sorted_projects, start=1):
+        # Critical column (index 3)
+        if project.get('critical_count', 0) > 0:
+            table_style.add('BACKGROUND', (3, i), (3, i), colors.HexColor('#ffcdd2'))
+        # High column (index 4)
+        if project.get('high_count', 0) > 0:
+            table_style.add('BACKGROUND', (4, i), (4, i), colors.HexColor('#ffe0b2'))
+        # Risk score coloring
+        risk_score = project.get('risk_score', 0)
+        if risk_score >= 80:
+            table_style.add('BACKGROUND', (2, i), (2, i), colors.HexColor('#ffcdd2'))
+        elif risk_score >= 40:
+            table_style.add('BACKGROUND', (2, i), (2, i), colors.HexColor('#ffe0b2'))
+        else:
+            table_style.add('BACKGROUND', (2, i), (2, i), colors.HexColor('#c8e6c9'))
+    
+    projects_table.setStyle(table_style)
+    elements.append(projects_table)
+    
+    # Footer
+    elements.append(Spacer(1, 30))
+    footer_style = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=8,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor('#999999')
+    )
+    elements.append(Paragraph(
+        f"Report generated by Trivy Security Dashboard | Data as of: {format_datetime_tz(app_data.get('last_updated'), tz)}",
+        footer_style
+    ))
+    
+    # Build PDF
+    doc.build(elements)
+    
+    # Prepare response
+    buffer.seek(0)
+    
+    # Generate filename with timestamp
+    filename = f"security_report_{report_time.strftime('%Y%m%d_%H%M%S')}.pdf"
+    
+    logger.info(f"✅ PDF report generated: {filename}")
+    
+    return send_file(
+        buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
 @app.errorhandler(500)
 def internal_error(error):
     """Handle internal server errors"""
