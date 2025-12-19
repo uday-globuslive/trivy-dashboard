@@ -547,6 +547,62 @@ Response:
 }
 ```
 
+### PDF Report Export
+
+Generate a PDF report of all projects with vulnerability summary, branch/environment counts, and risk scores. Perfect for sharing with stakeholders who don't have dashboard access.
+
+**Endpoint:** `GET /api/report/projects/pdf`
+
+**Query Parameters:**
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `timezone` | No | `Asia/Kolkata` | Timezone for date display (IANA timezone format) |
+
+**Usage Examples:**
+
+```bash
+# Default timezone (IST - Asia/Kolkata)
+curl -O http://localhost:5000/api/report/projects/pdf
+
+# Specific timezone examples
+curl -O "http://localhost:5000/api/report/projects/pdf?timezone=Asia/Kolkata"
+curl -O "http://localhost:5000/api/report/projects/pdf?timezone=America/New_York"
+curl -O "http://localhost:5000/api/report/projects/pdf?timezone=Europe/London"
+curl -O "http://localhost:5000/api/report/projects/pdf?timezone=UTC"
+```
+
+**Browser Access:**
+Simply open any of these URLs in your browser to download the PDF:
+- `http://localhost:5000/api/report/projects/pdf`
+- `http://localhost:5000/api/report/projects/pdf?timezone=Asia/Kolkata`
+- `http://localhost:5000/api/report/projects/pdf?timezone=America/New_York`
+- `http://localhost:5000/api/report/projects/pdf?timezone=UTC`
+
+**PDF Report Contents:**
+- **Header**: Report title with generation timestamp in specified timezone
+- **Summary Box**: Total projects, Critical, High, Medium, Low vulnerability counts
+- **Projects Table**:
+  - Project Name
+  - Branch/Environment Count (unique branches per project)
+  - Risk Score (color-coded: red ≥80%, orange ≥40%, green <40%)
+  - Critical, High, Medium, Low vulnerability counts
+  - Total Vulnerabilities
+  - Latest Scan Date (in specified timezone)
+  - Latest Branch/Environment name
+- **Footer**: Data timestamp
+
+**Common Timezone Values:**
+| Region | Timezone Value |
+|--------|----------------|
+| India (IST) | `Asia/Kolkata` |
+| US Eastern | `America/New_York` |
+| US Pacific | `America/Los_Angeles` |
+| UK | `Europe/London` |
+| Central Europe | `Europe/Berlin` |
+| Japan | `Asia/Tokyo` |
+| Australia | `Australia/Sydney` |
+| UTC | `UTC` |
+
 ---
 
 ## 🔄 Background Refresh
