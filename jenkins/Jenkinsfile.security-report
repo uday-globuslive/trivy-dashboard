@@ -166,11 +166,11 @@ pipeline {
                                 
                                 <p><strong>Report Contents:</strong></p>
                                 <ul>
-                                    <li>Summary of all projects with vulnerability counts</li>
-                                    <li>Risk scores for each project</li>
-                                    <li>Branch/Environment breakdown</li>
-                                    <li>Critical, High, Medium, and Low severity counts</li>
-                                    <li>Latest scan dates</li>
+                                    <li>Summary of all projects with total vulnerability counts</li>
+                                    <li>Projects overview with aggregated risk scores and vulnerability counts</li>
+                                    <li>All branches/environments shown as sub-rows under each project</li>
+                                    <li>Per-branch risk scores, Critical, High, Medium, Low severity counts</li>
+                                    <li>Latest scan date for each branch/environment</li>
                                 </ul>
                                 
                                 <p>For detailed analysis and drill-down capabilities, please visit the <a href="${params.DASHBOARD_URL}">Trivy Security Dashboard</a>.</p>

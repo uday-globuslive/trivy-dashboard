@@ -581,14 +581,17 @@ Simply open any of these URLs in your browser to download the PDF:
 **PDF Report Contents:**
 - **Header**: Report title with generation timestamp in specified timezone
 - **Summary Box**: Total projects, Critical, High, Medium, Low vulnerability counts
-- **Projects Table**:
-  - Project Name
-  - Branch/Environment Count (unique branches per project)
-  - Risk Score (color-coded: red ≥80%, orange ≥40%, green <40%)
-  - Critical, High, Medium, Low vulnerability counts
-  - Total Vulnerabilities
-  - Latest Scan Date (in specified timezone)
-  - Latest Branch/Environment name
+- **Projects Table** (with sub-rows for each branch/environment):
+  - **Project Main Row** (bold, highlighted background):
+    - Project Name with branch count in parentheses e.g., `ProjectA (2)`
+    - Aggregated Risk Score (color-coded: red ≥80%, orange ≥40%, green <40%)
+    - Total Critical, High, Medium, Low vulnerability counts
+    - Latest Scan Date across all branches
+  - **Branch/Environment Sub-rows** (indented with ↳):
+    - Branch/Environment name
+    - Per-branch Risk Score
+    - Per-branch Critical, High, Medium, Low counts
+    - Latest scan date for that specific branch
 - **Footer**: Data timestamp
 
 **Common Timezone Values:**
