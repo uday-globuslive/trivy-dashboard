@@ -14,6 +14,11 @@
         <a href="/projects" class="btn btn-outline-secondary me-2">
             <i class="fas fa-arrow-left me-1"></i>Back to Projects
         </a>
+        {% if scan %}
+        <a href="/scan/{{ scan.id }}/sbom/details" class="btn btn-info me-2">
+            <i class="fas fa-list-alt me-1"></i>SBOM Details
+        </a>
+        {% endif %}
         <button class="btn btn-outline-primary" onclick="refreshData()">
             <i class="fas fa-refresh me-1"></i>Refresh
         </button>
@@ -25,7 +30,7 @@
     <div class="col-md-3">
         <div class="card text-center border-danger">
             <div class="card-body">
-                <h3 class="text-danger">{{ scan.vulnerability_summary.critical }}</h3>
+                <h3 class="text-danger">{{ vulnerabilities_by_severity.critical|length }}</h3>
                 <p class="card-text">Critical</p>
             </div>
         </div>
@@ -33,7 +38,7 @@
     <div class="col-md-3">
         <div class="card text-center border-warning">
             <div class="card-body">
-                <h3 class="text-warning">{{ scan.vulnerability_summary.high }}</h3>
+                <h3 class="text-warning">{{ vulnerabilities_by_severity.high|length }}</h3>
                 <p class="card-text">High</p>
             </div>
         </div>
@@ -41,7 +46,7 @@
     <div class="col-md-3">
         <div class="card text-center border-info">
             <div class="card-body">
-                <h3 class="text-info">{{ scan.vulnerability_summary.medium }}</h3>
+                <h3 class="text-info">{{ vulnerabilities_by_severity.medium|length }}</h3>
                 <p class="card-text">Medium</p>
             </div>
         </div>
@@ -49,7 +54,7 @@
     <div class="col-md-3">
         <div class="card text-center border-success">
             <div class="card-body">
-                <h3 class="text-success">{{ scan.vulnerability_summary.low }}</h3>
+                <h3 class="text-success">{{ vulnerabilities_by_severity.low|length }}</h3>
                 <p class="card-text">Low</p>
             </div>
         </div>
@@ -59,8 +64,24 @@
 <div class="row">
     <div class="col-md-8">
         <div class="card">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Vulnerabilities</h5>
+                <div class="d-flex align-items-center">
+                    <!-- Severity Filter -->
+                    <select class="form-select form-select-sm me-2" style="width: auto;" onchange="filterBySeverity(this.value)">
+                        <option value="">All Severities</option>
+                        <option value="critical" {{ 'selected' if severity_filter == 'critical' }}>Critical</option>
+                        <option value="high" {{ 'selected' if severity_filter == 'high' }}>High</option>
+                        <option value="medium" {{ 'selected' if severity_filter == 'medium' }}>Medium</option>
+                        <option value="low" {{ 'selected' if severity_filter == 'low' }}>Low</option>
+                    </select>
+                    <!-- Per Page Select -->
+                    <select class="form-select form-select-sm" style="width: auto;" onchange="changePerPage(this.value)">
+                        <option value="25" {{ 'selected' if per_page == 25 }}>25 per page</option>
+                        <option value="50" {{ 'selected' if per_page == 50 }}>50 per page</option>
+                        <option value="100" {{ 'selected' if per_page == 100 }}>100 per page</option>
+                    </select>
+                </div>
             </div>
             <div class="card-body">
                 {% if scan.vulnerabilities %}
@@ -76,10 +97,10 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for vuln in scan.vulnerabilities[:50] %}
+                            {% for vuln in scan.vulnerabilities_paginated %}
                             <tr>
                                 <td>
-                                    <a href="https://nvd.nist.gov/vuln/detail/{{ vuln.id }}" target="_blank" class="text-decoration-none">
+                                    <a href="{{ url_for('vulnerability_detail', scan_id=scan.id, vuln_id=vuln.id) }}" class="text-decoration-none">
                                         {{ vuln.id }}
                                     </a>
                                 </td>
@@ -88,19 +109,77 @@
                                         {{ vuln.severity }}
                                     </span>
                                 </td>
-                                <td>{{ vuln.affects or 'N/A' }}</td>
-                                <td>{{ vuln.cvss_score or 'N/A' }}</td>
+                                <td>
+                                    {% if vuln.affects %}
+                                        {% if vuln.affects is string %}
+                                            {{ vuln.affects }}
+                                        {% else %}
+                                            {{ vuln.affects|length }} components
+                                        {% endif %}
+                                    {% else %}
+                                        N/A
+                                    {% endif %}
+                                </td>
+                                <td>{{ vuln.score or 'N/A' }}</td>
                                 <td class="text-truncate" style="max-width: 300px;" title="{{ vuln.description }}">
-                                    {{ vuln.description[:100] }}...
+                                    {% if vuln.description and vuln.description|length > 100 %}
+                                        {{ vuln.description[:100] }}...
+                                    {% else %}
+                                        {{ vuln.description or 'No description available' }}
+                                    {% endif %}
                                 </td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
-                {% if scan.vulnerabilities|length > 50 %}
-                <p class="text-muted">Showing first 50 of {{ scan.vulnerabilities|length }} vulnerabilities.</p>
-                {% endif %}
+                
+                <!-- Pagination Info and Controls -->
+                <div class="d-flex justify-content-between align-items-center mt-3">
+                    <div>
+                        <p class="text-muted mb-0">
+                            Showing {{ ((page - 1) * per_page + 1) }} to {{ (page * per_page) if (page * per_page) <= total_vulns else total_vulns }} of {{ total_vulns }} vulnerabilities
+                            {% if severity_filter %} (filtered by {{ severity_filter|title }}){% endif %}
+                        </p>
+                    </div>
+                    
+                    {% if total_pages > 1 %}
+                    <nav aria-label="Vulnerability pagination">
+                        <ul class="pagination pagination-sm mb-0">
+                            <li class="page-item {{ 'disabled' if not has_prev }}">
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=1, per_page=per_page, severity=severity_filter) if has_prev else '#' }}">First</a>
+                            </li>
+                            <li class="page-item {{ 'disabled' if not has_prev }}">
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page-1, per_page=per_page, severity=severity_filter) if has_prev else '#' }}">Previous</a>
+                            </li>
+                            
+                            {% set start_page = [1, page - 2]|max %}
+                            {% set end_page = [total_pages, page + 2]|min %}
+                            
+                            {% if start_page > 1 %}
+                                <li class="page-item disabled"><span class="page-link">...</span></li>
+                            {% endif %}
+                            
+                            {% for p in range(start_page, end_page + 1) %}
+                                <li class="page-item {{ 'active' if p == page }}">
+                                    <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=p, per_page=per_page, severity=severity_filter) }}">{{ p }}</a>
+                                </li>
+                            {% endfor %}
+                            
+                            {% if end_page < total_pages %}
+                                <li class="page-item disabled"><span class="page-link">...</span></li>
+                            {% endif %}
+                            
+                            <li class="page-item {{ 'disabled' if not has_next }}">
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page+1, per_page=per_page, severity=severity_filter) if has_next else '#' }}">Next</a>
+                            </li>
+                            <li class="page-item {{ 'disabled' if not has_next }}">
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=total_pages, per_page=per_page, severity=severity_filter) if has_next else '#' }}">Last</a>
+                            </li>
+                        </ul>
+                    </nav>
+                    {% endif %}
+                </div>
                 {% else %}
                 <p class="text-muted">No vulnerabilities found in this scan.</p>
                 {% endif %}
@@ -128,7 +207,12 @@
                     <dd class="col-7">{{ scan.components|length }}</dd>
                     
                     <dt class="col-5">Risk Score:</dt>
-                    <dd class="col-7">{{ scan.risk_score }}%</dd>
+                    <dd class="col-7">
+                        <span>{{ scan.risk_score }}%</span>
+                        <button class="btn btn-sm btn-link p-0 ms-2" data-bs-toggle="modal" data-bs-target="#riskCalculationScanModal" title="View risk calculation methodology">
+                            <i class="fas fa-info-circle text-info"></i>
+                        </button>
+                    </dd>
                 </dl>
             </div>
         </div>
@@ -172,4 +256,129 @@
     </a>
 </div>
 {% endif %}
+
+<script>
+function filterBySeverity(severity) {
+    const url = new URL(window.location);
+    if (severity) {
+        url.searchParams.set('severity', severity);
+    } else {
+        url.searchParams.delete('severity');
+    }
+    url.searchParams.set('page', '1'); // Reset to first page
+    window.location.href = url.toString();
+}
+
+function changePerPage(perPage) {
+    const url = new URL(window.location);
+    url.searchParams.set('per_page', perPage);
+    url.searchParams.set('page', '1'); // Reset to first page
+    window.location.href = url.toString();
+}
+
+function refreshData() {
+    fetch('/refresh')
+        .then(response => {
+            if (response.ok) {
+                location.reload();
+            }
+        })
+        .catch(error => console.error('Error refreshing data:', error));
+}
+</script>
+
+<!-- Risk Calculation Info Modal for Scans -->
+<div class="modal fade" id="riskCalculationScanModal" tabindex="-1" aria-labelledby="riskCalculationScanModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="riskCalculationScanModalLabel">
+                    <i class="fas fa-calculator text-info me-2"></i>Risk Score Calculation
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="card mb-3 border-start border-info">
+                    <div class="card-body">
+                        <h6 class="fw-bold text-info mb-3">
+                            <i class="fas fa-chart-pie me-2"></i>Methodology
+                        </h6>
+                        <p class="text-justify">
+                            The risk score is calculated based on the vulnerability severity distribution in this scan. 
+                            It uses a weighted severity scoring system that normalizes the total weighted score to a 0-100% scale.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="card mb-3 border-start border-primary">
+                    <div class="card-body">
+                        <h6 class="fw-bold text-primary mb-3">
+                            <i class="fas fa-balance-scale me-2"></i>Severity Weights
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <ul class="list-unstyled">
+                                    <li><span class="badge bg-danger">Critical</span> = <strong>10 points</strong></li>
+                                    <li><span class="badge bg-warning">High</span> = <strong>7 points</strong></li>
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <ul class="list-unstyled">
+                                    <li><span class="badge bg-warning">Medium</span> = <strong>4 points</strong></li>
+                                    <li><span class="badge bg-info">Low</span> = <strong>1 point</strong></li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3 border-start border-success">
+                    <div class="card-body">
+                        <h6 class="fw-bold text-success mb-3">
+                            <i class="fas fa-calculator me-2"></i>Formula
+                        </h6>
+                        <p class="font-monospace bg-light p-3 rounded">
+                            <strong>Risk Score % = (Total Weighted Score ÷ Max Possible Score) × 100</strong>
+                        </p>
+                        <p class="text-muted small mt-2">
+                            Where:<br>
+                            • Total Weighted Score = (Critical × 10) + (High × 7) + (Medium × 4) + (Low × 1)<br>
+                            • Max Possible Score = Total Vulnerabilities × 10
+                        </p>
+                    </div>
+                </div>
+
+                <div class="card border-start border-warning">
+                    <div class="card-body">
+                        <h6 class="fw-bold text-warning mb-3">
+                            <i class="fas fa-traffic-light me-2"></i>Risk Levels
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="small">
+                                    <p><span class="badge bg-danger">CRITICAL</span> 80-100%</p>
+                                    <p><span class="badge bg-warning">HIGH</span> 60-79%</p>
+                                    <p><span class="badge bg-warning">MEDIUM</span> 40-59%</p>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="small">
+                                    <p><span class="badge bg-success">LOW</span> 20-39%</p>
+                                    <p><span class="badge bg-info">MINIMAL</span> 0-19%</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <p class="text-muted small m-0">
+                    <i class="fas fa-info-circle me-1"></i>Score is calculated from vulnerabilities in this scan
+                </p>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}

@@ -11,10 +11,14 @@ services:
       - NEXUS_USERNAME=${NEXUS_USERNAME:-admin}
       - NEXUS_PASSWORD=${NEXUS_PASSWORD:-admin123}
       - NEXUS_REPOSITORY=${NEXUS_REPOSITORY:-trivy-reports}
+      - NEXUS_GROUP_ID=${NEXUS_GROUP_ID:-com.example}
+      - NEXUS_ARTIFACT_SUFFIX=${NEXUS_ARTIFACT_SUFFIX:--trivy-report}
+      - NEXUS_VERSION_PREFIX=${NEXUS_VERSION_PREFIX:-1.0.0-}
+      - NEXUS_ASSET_EXTENSION=${NEXUS_ASSET_EXTENSION:-json}
       - FLASK_ENV=production
       - FLASK_DEBUG=false
-      - CACHE_TTL=300
-      - DATA_REFRESH_INTERVAL=600
+      - CACHE_TTL=${CACHE_TTL:-300}
+      - DATA_REFRESH_INTERVAL=${DATA_REFRESH_INTERVAL:-600}
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped
