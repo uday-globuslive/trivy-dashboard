@@ -59,6 +59,25 @@
                             <i class="fas fa-cubes me-1"></i>Components
                         </a>
                     </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="reportsDropdown" role="button" 
+                           data-bs-toggle="dropdown">
+                            <i class="fas fa-file-alt me-1"></i>Reports
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><h6 class="dropdown-header">Projects</h6></li>
+                            <li>
+                                <a class="dropdown-item" href="/api/report/projects/pdf" target="_blank">
+                                    <i class="fas fa-file-pdf me-2"></i>PDF
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item" href="/api/report/projects/csv" target="_blank">
+                                    <i class="fas fa-file-csv me-2"></i>CSV
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
                 </ul>
                 
                 <ul class="navbar-nav">
@@ -132,7 +151,7 @@
                     <h6><i class="fas fa-info-circle me-2"></i>About Trivy Dashboard</h6>
                     <p class="small mb-0">
                         Comprehensive security vulnerability monitoring dashboard powered by Trivy security scanner.
-                        Displays real-time security insights from CycloneDX SBOM files stored in Nexus Repository.
+                        Displays real-time security insights from Trivy JSON and CycloneDX SBOM files stored in Nexus/JFrog Repository.
                     </p>
                 </div>
                 <div class="col-md-3">
@@ -146,7 +165,7 @@
                 <div class="col-md-3">
                     <h6><i class="fas fa-chart-line me-2"></i>Data Sources</h6>
                     <ul class="list-unstyled small">
-                        <li><i class="fas fa-database me-1"></i>Nexus Repository</li>
+                        <li><i class="fas fa-database me-1"></i>Nexus/JFrog Repository</li>
                         <li><i class="fas fa-file-code me-1"></i>CycloneDX SBOMs</li>
                         <li><i class="fas fa-shield-alt me-1"></i>Trivy Scanner</li>
                     </ul>

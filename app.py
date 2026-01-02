@@ -1525,6 +1525,215 @@ def export_projects_pdf():
     )
 
 
+@app.route('/api/report/projects/csv')
+def export_projects_csv():
+    """
+    Export projects summary as CSV report with all branches/environments.
+    
+    Query Parameters:
+        timezone: Timezone for date display (default: 'Asia/Kolkata' for IST)
+                  Examples: 'America/New_York', 'Europe/London', 'UTC'
+    
+    Returns:
+        CSV file download with projects summary including all branch details
+    """
+    import io
+    import csv
+    import pytz
+    
+    logger.info("📄 Generating CSV report for projects")
+    
+    # Get timezone parameter (default to IST)
+    tz_name = request.args.get('timezone', 'Asia/Kolkata')
+    try:
+        tz = pytz.timezone(tz_name)
+    except pytz.exceptions.UnknownTimeZoneError:
+        logger.warning(f"⚠️ Unknown timezone: {tz_name}, using Asia/Kolkata")
+        tz = pytz.timezone('Asia/Kolkata')
+    
+    # Helper function to format datetime in specified timezone
+    def format_datetime_tz(dt, timezone):
+        if dt is None:
+            return "Never"
+        try:
+            if dt.tzinfo is None:
+                dt = pytz.UTC.localize(dt)
+            local_dt = dt.astimezone(timezone)
+            return local_dt.strftime('%Y-%m-%d %H:%M:%S %Z')
+        except Exception as e:
+            logger.warning(f"⚠️ Error formatting datetime: {e}")
+            return str(dt)
+    
+    # Create CSV buffer
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    
+    # Report metadata
+    report_time = datetime.now()
+    report_time_tz = pytz.UTC.localize(report_time).astimezone(tz)
+    
+    writer.writerow(['Security Vulnerability Report'])
+    writer.writerow([f'Generated on: {report_time_tz.strftime("%Y-%m-%d %H:%M:%S %Z")}'])
+    writer.writerow([f'Timezone: {tz_name}'])
+    writer.writerow([])  # Empty row
+    
+    # Summary section - Calculate totals from latest scan of each branch/environment
+    total_projects = len(app_data['projects'])
+    total_critical = 0
+    total_high = 0
+    total_medium = 0
+    total_low = 0
+    total_environments = 0
+    
+    # For each project, find latest scan per branch and sum up vulnerabilities
+    for project in app_data['projects'].values():
+        project_scans = [app_data['scans'].get(scan_id) for scan_id in project.get('scans', [])]
+        project_scans = [s for s in project_scans if s is not None]
+        
+        # Group scans by branch and get latest for each
+        branch_latest = {}
+        for scan in project_scans:
+            branch = scan.get('branch_name') or 'not provided'
+            scan_timestamp = scan.get('timestamp') or datetime.min
+            
+            if branch not in branch_latest:
+                branch_latest[branch] = scan
+            else:
+                existing_timestamp = branch_latest[branch].get('timestamp') or datetime.min
+                if scan_timestamp > existing_timestamp:
+                    branch_latest[branch] = scan
+        
+        total_environments += len(branch_latest)
+        
+        # Sum vulnerabilities from latest scan of each branch only
+        for latest_scan in branch_latest.values():
+            vulns = latest_scan.get('vulnerabilities', [])
+            total_critical += len([v for v in vulns if v.get('severity', '').upper() == 'CRITICAL'])
+            total_high += len([v for v in vulns if v.get('severity', '').upper() == 'HIGH'])
+            total_medium += len([v for v in vulns if v.get('severity', '').upper() == 'MEDIUM'])
+            total_low += len([v for v in vulns if v.get('severity', '').upper() == 'LOW'])
+    
+    # Summary section
+    writer.writerow(['SUMMARY'])
+    writer.writerow(['Total Projects', 'Environments', 'Critical', 'High', 'Medium', 'Low'])
+    writer.writerow([total_projects, total_environments, total_critical, total_high, total_medium, total_low])
+    writer.writerow([])  # Empty row
+    
+    # Projects table header
+    writer.writerow(['PROJECTS OVERVIEW (with Branch/Environment Details)'])
+    writer.writerow(['Project Name', 'Branch/Environment', 'Critical', 'High', 'Medium', 'Low', 'Total', 'Latest Scan Date'])
+    
+    # Sort projects by risk score (highest first)
+    sorted_projects = sorted(
+        app_data['projects'].values(),
+        key=lambda x: x.get('risk_score', 0),
+        reverse=True
+    )
+    
+    for project in sorted_projects:
+        project_name = project.get('name', 'Unknown')
+        
+        # Get all scans for this project
+        project_scans = [app_data['scans'].get(scan_id) for scan_id in project.get('scans', [])]
+        project_scans = [s for s in project_scans if s is not None]
+        
+        # Group scans by branch/environment and get latest for each
+        branch_latest_scans = {}
+        for scan in project_scans:
+            branch = scan.get('branch_name') or 'not provided'
+            scan_timestamp = scan.get('timestamp') or datetime.min
+            
+            if branch not in branch_latest_scans:
+                branch_latest_scans[branch] = scan
+            else:
+                existing_timestamp = branch_latest_scans[branch].get('timestamp') or datetime.min
+                if scan_timestamp > existing_timestamp:
+                    branch_latest_scans[branch] = scan
+        
+        branch_count = len(branch_latest_scans)
+        
+        # Calculate totals from latest scan of each branch
+        proj_critical = 0
+        proj_high = 0
+        proj_medium = 0
+        proj_low = 0
+        proj_total = 0
+        latest_scan_time = None
+        
+        for branch_scan in branch_latest_scans.values():
+            vulns = branch_scan.get('vulnerabilities', [])
+            proj_critical += len([v for v in vulns if v.get('severity', '').upper() == 'CRITICAL'])
+            proj_high += len([v for v in vulns if v.get('severity', '').upper() == 'HIGH'])
+            proj_medium += len([v for v in vulns if v.get('severity', '').upper() == 'MEDIUM'])
+            proj_low += len([v for v in vulns if v.get('severity', '').upper() == 'LOW'])
+            proj_total += len(vulns)
+            scan_time = branch_scan.get('timestamp')
+            if scan_time and (latest_scan_time is None or scan_time > latest_scan_time):
+                latest_scan_time = scan_time
+        
+        # Add project main row (totals from latest scan of each branch)
+        project_display = f"{project_name}" + (f" ({branch_count} branches)" if branch_count > 1 else "")
+        writer.writerow([
+            project_display,
+            'ALL BRANCHES (Total)',
+            proj_critical,
+            proj_high,
+            proj_medium,
+            proj_low,
+            proj_total,
+            format_datetime_tz(latest_scan_time, tz)
+        ])
+        
+        # Add sub-rows for each branch/environment (using latest scan only)
+        sorted_branches = sorted(branch_latest_scans.items(), 
+                                  key=lambda x: x[1].get('timestamp') or datetime.min, 
+                                  reverse=True)
+        
+        for branch_name, latest_scan in sorted_branches:
+            # Calculate vulnerability counts for this branch's latest scan only
+            vulns = latest_scan.get('vulnerabilities', [])
+            branch_critical = len([v for v in vulns if v.get('severity', '').upper() == 'CRITICAL'])
+            branch_high = len([v for v in vulns if v.get('severity', '').upper() == 'HIGH'])
+            branch_medium = len([v for v in vulns if v.get('severity', '').upper() == 'MEDIUM'])
+            branch_low = len([v for v in vulns if v.get('severity', '').upper() == 'LOW'])
+            branch_total = len(vulns)
+            
+            writer.writerow([
+                '',  # Empty for project name column (sub-row)
+                f'  ↳ {branch_name}',
+                branch_critical,
+                branch_high,
+                branch_medium,
+                branch_low,
+                branch_total,
+                format_datetime_tz(latest_scan.get('timestamp'), tz)
+            ])
+    
+    # Footer
+    writer.writerow([])  # Empty row
+    writer.writerow([f'Report generated by Trivy Security Dashboard | Data as of: {format_datetime_tz(app_data.get("last_updated"), tz)}'])
+    
+    # Prepare response
+    output = buffer.getvalue()
+    buffer.close()
+    
+    # Create bytes buffer for send_file
+    bytes_buffer = io.BytesIO(output.encode('utf-8-sig'))  # utf-8-sig for Excel compatibility
+    bytes_buffer.seek(0)
+    
+    # Generate filename with timestamp
+    filename = f"security_report_{report_time.strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    logger.info(f"✅ CSV report generated: {filename}")
+    
+    return send_file(
+        bytes_buffer,
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
 @app.errorhandler(500)
 def internal_error(error):
     """Handle internal server errors"""
