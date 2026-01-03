@@ -740,7 +740,7 @@ def sbom_analysis():
             'total_scans': len(project_data.get('scans', [])),
             'has_vulnerabilities': project_data.get('total_vulnerabilities', 0) > 0,
             'component_count': project_data.get('component_count', 0),
-            'latest_scan': project_data.get('latest_scan', 'unknown'),
+            'latest_scan': project_data.get('last_scan', 'unknown'),
             'sbom_type': 'vulnerability-enhanced' if project_data.get('total_vulnerabilities', 0) > 0 else 'component-only'
         }
         
