@@ -21,6 +21,7 @@ from services.trivy_parser import TrivyReportParser
 from services.analytics import SecurityAnalytics
 from services.hybrid_sbom_parser import HybridSBOMParser
 from utils.cache import CacheManager
+from utils.disk_cache import DiskCacheManager
 from utils.helpers import format_timestamp, calculate_risk_score
 from config import Config
 
@@ -61,11 +62,15 @@ artifactory_client = create_artifactory_client()
 trivy_parser = TrivyReportParser()
 analytics = SecurityAnalytics()
 cache_manager = CacheManager()
+disk_cache = DiskCacheManager(
+    cache_dir='./data/cache',
+    max_memory_mb=500  # Limit in-memory cache to 500MB
+)
 
 # Maintain backward compatibility - nexus_client is now artifactory_client
 nexus_client = artifactory_client
 
-# Global data store (acts as in-memory database)
+# Global data store (acts as in-memory database for frequently accessed data)
 app_data = {
     'projects': {},
     'scans': {},
@@ -197,7 +202,23 @@ def refresh_data_background():
                         project['low_count']
                     )
                 
-                # Update global data
+                # Save all data to disk cache
+                logger.info("💾 Saving data to disk cache...")
+                disk_cache.clear_all()  # Clear old data
+                disk_cache.save_projects(projects)
+                
+                # Save scans to disk
+                for scan_id, scan_data in scans.items():
+                    disk_cache.save_scan(scan_id, scan_data)
+                
+                # Save vulnerabilities to disk
+                for vuln_list in vulnerabilities.values():
+                    for vuln_item in vuln_list:
+                        vuln_id = vuln_item['details'].get('id', '')
+                        scan_id = vuln_item.get('scan_id', '')
+                        disk_cache.save_vulnerability(vuln_id, scan_id, vuln_item['details'])
+                
+                # Update global data (keep limited in-memory cache)
                 app_data['projects'] = projects
                 app_data['scans'] = scans
                 app_data['vulnerabilities'] = vulnerabilities
@@ -475,10 +496,17 @@ def scan_detail(scan_id):
     """Individual scan details with pagination"""
     logger.info(f"🔍 Rendering scan detail for: {scan_id}")
     
-    if scan_id not in app_data['scans']:
-        return "Scan not found", 404
-    
-    scan = app_data['scans'][scan_id]
+    # Try to get scan from in-memory cache first, then disk cache
+    scan = None
+    if scan_id in app_data['scans']:
+        scan = app_data['scans'][scan_id]
+    else:
+        # Load from disk cache
+        scan = disk_cache.load_scan(scan_id)
+        if scan:
+            app_data['scans'][scan_id] = scan
+        else:
+            return "Scan not found", 404
     
     # Get pagination parameters
     page = request.args.get('page', 1, type=int)
@@ -540,10 +568,17 @@ def vulnerability_detail(scan_id, vuln_id):
     """Individual vulnerability details with SBOM information from Trivy report"""
     logger.info(f"🔍 Rendering vulnerability detail for: {vuln_id} in scan: {scan_id}")
     
-    if scan_id not in app_data['scans']:
-        return "Scan not found", 404
-    
-    scan = app_data['scans'][scan_id]
+    # Try to get scan from in-memory cache first, then disk cache
+    scan = None
+    if scan_id in app_data['scans']:
+        scan = app_data['scans'][scan_id]
+    else:
+        # Load from disk cache
+        scan = disk_cache.load_scan(scan_id)
+        if scan:
+            app_data['scans'][scan_id] = scan
+        else:
+            return "Scan not found", 404
     
     # Find the vulnerability
     vulnerability = None
@@ -718,12 +753,33 @@ def manual_refresh():
 @app.route('/api/health')
 def health_check():
     """Health check endpoint"""
+    cache_stats = disk_cache.get_cache_stats()
+    
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'artifactory_type': Config.ARTIFACTORY_TYPE,
         'artifactory_connection': nexus_client.test_connection(),
-        'data_available': len(app_data['projects']) > 0
+        'data_available': len(app_data['projects']) > 0,
+        'cache': cache_stats
+    })
+
+@app.route('/api/cache/stats')
+def cache_stats():
+    """Get detailed cache statistics"""
+    logger.info("📊 Cache statistics requested")
+    
+    stats = disk_cache.get_cache_stats()
+    
+    return jsonify({
+        'status': 'success',
+        'timestamp': datetime.now().isoformat(),
+        'cache': stats,
+        'app_data': {
+            'projects_in_memory': len(app_data['projects']),
+            'scans_in_memory': len(app_data['scans']),
+            'last_updated': app_data['last_updated'].isoformat() if app_data['last_updated'] else None
+        }
     })
 
 @app.route('/api/sbom-analysis')
