@@ -484,11 +484,16 @@ def scan_detail(scan_id):
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
     severity_filter = request.args.get('severity', '').upper()
+    cve_search = request.args.get('cve_search', '').strip().upper()
     
     # Filter vulnerabilities by severity if specified
     vulnerabilities = scan['vulnerabilities']
     if severity_filter and severity_filter in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']:
         vulnerabilities = [v for v in vulnerabilities if v.get('severity', '').upper() == severity_filter]
+    
+    # Filter vulnerabilities by CVE if specified
+    if cve_search:
+        vulnerabilities = [v for v in vulnerabilities if cve_search in v.get('id', '').upper()]
     
     # Calculate pagination
     total_vulns = len(vulnerabilities)
@@ -526,7 +531,8 @@ def scan_detail(scan_id):
         total_pages=total_pages,
         has_prev=has_prev,
         has_next=has_next,
-        severity_filter=severity_filter.lower() if severity_filter else ''
+        severity_filter=severity_filter.lower() if severity_filter else '',
+        cve_search=cve_search
     )
 
 @app.route('/scan/<scan_id>/vulnerability/<vuln_id>')

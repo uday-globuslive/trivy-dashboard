@@ -64,23 +64,33 @@
 <div class="row">
     <div class="col-md-8">
         <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Vulnerabilities</h5>
-                <div class="d-flex align-items-center">
-                    <!-- Severity Filter -->
-                    <select class="form-select form-select-sm me-2" style="width: auto;" onchange="filterBySeverity(this.value)">
-                        <option value="">All Severities</option>
-                        <option value="critical" {{ 'selected' if severity_filter == 'critical' }}>Critical</option>
-                        <option value="high" {{ 'selected' if severity_filter == 'high' }}>High</option>
-                        <option value="medium" {{ 'selected' if severity_filter == 'medium' }}>Medium</option>
-                        <option value="low" {{ 'selected' if severity_filter == 'low' }}>Low</option>
-                    </select>
-                    <!-- Per Page Select -->
-                    <select class="form-select form-select-sm" style="width: auto;" onchange="changePerPage(this.value)">
-                        <option value="25" {{ 'selected' if per_page == 25 }}>25 per page</option>
-                        <option value="50" {{ 'selected' if per_page == 50 }}>50 per page</option>
-                        <option value="100" {{ 'selected' if per_page == 100 }}>100 per page</option>
-                    </select>
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Vulnerabilities</h5>
+                </div>
+                <div class="row g-2">
+                    <div class="col-12 col-md-4">
+                        <input type="text" class="form-control form-control-sm" id="cveSearch" placeholder="Search CVE (e.g., CVE-2021-1234)" value="{{ cve_search }}" onkeyup="searchByCVE(event)">
+                        <small class="text-muted">Press Enter to search</small>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <!-- Severity Filter -->
+                        <select class="form-select form-select-sm" onchange="filterBySeverity(this.value)">
+                            <option value="">All Severities</option>
+                            <option value="critical" {{ 'selected' if severity_filter == 'critical' }}>Critical</option>
+                            <option value="high" {{ 'selected' if severity_filter == 'high' }}>High</option>
+                            <option value="medium" {{ 'selected' if severity_filter == 'medium' }}>Medium</option>
+                            <option value="low" {{ 'selected' if severity_filter == 'low' }}>Low</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <!-- Per Page Select -->
+                        <select class="form-select form-select-sm" onchange="changePerPage(this.value)">
+                            <option value="25" {{ 'selected' if per_page == 25 }}>25 per page</option>
+                            <option value="50" {{ 'selected' if per_page == 50 }}>50 per page</option>
+                            <option value="100" {{ 'selected' if per_page == 100 }}>100 per page</option>
+                        </select>
+                    </div>
                 </div>
             </div>
             <div class="card-body">
@@ -140,6 +150,7 @@
                         <p class="text-muted mb-0">
                             Showing {{ ((page - 1) * per_page + 1) }} to {{ (page * per_page) if (page * per_page) <= total_vulns else total_vulns }} of {{ total_vulns }} vulnerabilities
                             {% if severity_filter %} (filtered by {{ severity_filter|title }}){% endif %}
+                            {% if cve_search %} (CVE search: {{ cve_search }}){% endif %}
                         </p>
                     </div>
                     
@@ -147,10 +158,10 @@
                     <nav aria-label="Vulnerability pagination">
                         <ul class="pagination pagination-sm mb-0">
                             <li class="page-item {{ 'disabled' if not has_prev }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=1, per_page=per_page, severity=severity_filter) if has_prev else '#' }}">First</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=1, per_page=per_page, severity=severity_filter, cve_search=cve_search) if has_prev else '#' }}">First</a>
                             </li>
                             <li class="page-item {{ 'disabled' if not has_prev }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page-1, per_page=per_page, severity=severity_filter) if has_prev else '#' }}">Previous</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page-1, per_page=per_page, severity=severity_filter, cve_search=cve_search) if has_prev else '#' }}">Previous</a>
                             </li>
                             
                             {% set start_page = [1, page - 2]|max %}
@@ -162,7 +173,7 @@
                             
                             {% for p in range(start_page, end_page + 1) %}
                                 <li class="page-item {{ 'active' if p == page }}">
-                                    <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=p, per_page=per_page, severity=severity_filter) }}">{{ p }}</a>
+                                    <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=p, per_page=per_page, severity=severity_filter, cve_search=cve_search) }}">{{ p }}</a>
                                 </li>
                             {% endfor %}
                             
@@ -171,10 +182,10 @@
                             {% endif %}
                             
                             <li class="page-item {{ 'disabled' if not has_next }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page+1, per_page=per_page, severity=severity_filter) if has_next else '#' }}">Next</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page+1, per_page=per_page, severity=severity_filter, cve_search=cve_search) if has_next else '#' }}">Next</a>
                             </li>
                             <li class="page-item {{ 'disabled' if not has_next }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=total_pages, per_page=per_page, severity=severity_filter) if has_next else '#' }}">Last</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=total_pages, per_page=per_page, severity=severity_filter, cve_search=cve_search) if has_next else '#' }}">Last</a>
                             </li>
                         </ul>
                     </nav>
@@ -274,6 +285,23 @@ function changePerPage(perPage) {
     url.searchParams.set('per_page', perPage);
     url.searchParams.set('page', '1'); // Reset to first page
     window.location.href = url.toString();
+}
+
+function searchByCVE(event) {
+    // Allow search on Enter key or directly update
+    if (event.key === 'Enter' || event.type === 'keyup') {
+        const cveSearch = document.getElementById('cveSearch').value.trim();
+        const url = new URL(window.location);
+        if (cveSearch) {
+            url.searchParams.set('cve_search', cveSearch);
+        } else {
+            url.searchParams.delete('cve_search');
+        }
+        url.searchParams.set('page', '1'); // Reset to first page
+        if (event.key === 'Enter') {
+            window.location.href = url.toString();
+        }
+    }
 }
 
 function refreshData() {
