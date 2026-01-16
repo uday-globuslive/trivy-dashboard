@@ -122,6 +122,16 @@ class DiskCacheManager:
                     )
                 ''')
                 
+                # File tracking table for incremental updates
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS file_manifest (
+                        file_path TEXT PRIMARY KEY,
+                        file_checksum TEXT NOT NULL,
+                        file_timestamp TIMESTAMP,
+                        processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
                 conn.commit()
                 logger.info("✅ Database schema initialized")
                 
@@ -387,6 +397,56 @@ class DiskCacheManager:
             logger.error(f"❌ Error loading vulnerabilities for CVE {cve_id}: {str(e)}")
             return []
     
+    # ==================== FILE MANIFEST (Incremental Updates) ====================
+    def get_file_manifest(self) -> Dict[str, Dict[str, Any]]:
+        """Get manifest of previously processed files with checksums"""
+        try:
+            with self.lock:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT file_path, file_checksum, file_timestamp FROM file_manifest')
+                    
+                    manifest = {}
+                    for path, checksum, timestamp in cursor.fetchall():
+                        manifest[path] = {
+                            'checksum': checksum,
+                            'timestamp': timestamp
+                        }
+                    
+                    logger.debug(f"📋 Loaded file manifest with {len(manifest)} entries")
+                    return manifest
+        except Exception as e:
+            logger.error(f"❌ Error loading file manifest: {str(e)}")
+            return {}
+    
+    def update_file_manifest(self, file_path: str, file_checksum: str, file_timestamp: Optional[datetime] = None):
+        """Update file manifest entry (used for incremental updates)"""
+        try:
+            with self.lock:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO file_manifest (file_path, file_checksum, file_timestamp, processed_at)
+                        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ''', (file_path, file_checksum, file_timestamp))
+                    
+                    conn.commit()
+                    logger.debug(f"✅ Updated manifest for {file_path}")
+        except Exception as e:
+            logger.error(f"❌ Error updating file manifest: {str(e)}")
+    
+    def clear_file_manifest(self):
+        """Clear file manifest (used before full refresh)"""
+        try:
+            with self.lock:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('DELETE FROM file_manifest')
+                    conn.commit()
+                    logger.info("🧹 Cleared file manifest")
+        except Exception as e:
+            logger.error(f"❌ Error clearing file manifest: {str(e)}")
+    
     # ==================== CACHE OPERATIONS ====================
     def clear_all(self) -> bool:
         """Clear all cache data"""
@@ -397,6 +457,7 @@ class DiskCacheManager:
                     cursor.execute('DELETE FROM vulnerabilities')
                     cursor.execute('DELETE FROM scans')
                     cursor.execute('DELETE FROM projects')
+                    cursor.execute('DELETE FROM file_manifest')
                     conn.commit()
                 
                 self.memory_cache.clear()
@@ -406,6 +467,50 @@ class DiskCacheManager:
                 return True
         except Exception as e:
             logger.error(f"❌ Error clearing cache: {str(e)}")
+            return False
+    
+    def delete_project_scans(self, project_name: str) -> bool:
+        """Delete all scans for a specific project (for cleanup)"""
+        try:
+            with self.lock:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    
+                    # Get scan IDs for this project
+                    cursor.execute('SELECT id FROM scans WHERE project_name = ?', (project_name,))
+                    scan_ids = [row[0] for row in cursor.fetchall()]
+                    
+                    # Delete vulnerabilities for these scans
+                    for scan_id in scan_ids:
+                        cursor.execute('DELETE FROM vulnerabilities WHERE scan_id = ?', (scan_id,))
+                    
+                    # Delete scans
+                    cursor.execute('DELETE FROM scans WHERE project_name = ?', (project_name,))
+                    
+                    conn.commit()
+                    logger.info(f"🗑️ Deleted {len(scan_ids)} scans for project {project_name}")
+                    return True
+        except Exception as e:
+            logger.error(f"❌ Error deleting project scans: {str(e)}")
+            return False
+    
+    def delete_project(self, project_name: str) -> bool:
+        """Delete entire project (cascade to scans and vulnerabilities)"""
+        try:
+            with self.lock:
+                # First delete scans and vulnerabilities
+                self.delete_project_scans(project_name)
+                
+                # Then delete project
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('DELETE FROM projects WHERE name = ?', (project_name,))
+                    conn.commit()
+                
+                logger.info(f"🗑️ Deleted project {project_name} and all related data")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Error deleting project: {str(e)}")
             return False
     
     def get_cache_stats(self) -> Dict[str, Any]:

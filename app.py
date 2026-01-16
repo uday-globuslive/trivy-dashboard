@@ -8,8 +8,9 @@ Trivy security scan results from native Trivy report JSON files stored in Nexus 
 import os
 import json
 import logging
+import hashlib
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, send_file, Response
+from flask import Flask, render_template, request, jsonify, send_file, Response, redirect
 from flask_cors import CORS
 import threading
 import time
@@ -77,14 +78,24 @@ app_data = {
     'vulnerabilities': {},
     'last_updated': None,
     'is_loading': False,
-    'force_refresh': False  # Flag to force immediate refresh
+    'force_refresh': False,  # Flag to force immediate refresh
+    'loading_stats': {
+        'total_files': 0,
+        'loaded_files': 0,
+        'total_scans': 0,
+        'loaded_scans': 0,
+        'total_vulns': 0,
+        'loaded_vulns': 0,
+        'current_file': '',
+        'status_message': 'Idle'
+    }
 }
 
 # Threading event for immediate refresh trigger
 refresh_event = threading.Event()
 
 def refresh_data_background():
-    """Background task to refresh data from Nexus"""
+    """Background task to refresh data from Nexus with incremental updates"""
     while True:
         try:
             # Check if we should refresh: either on regular interval or forced refresh
@@ -95,24 +106,115 @@ def refresh_data_background():
                 logger.info("🔄 Starting background data refresh...")
                 app_data['is_loading'] = True
                 
+                # Reset loading stats
+                app_data['loading_stats'] = {
+                    'total_files': 0,
+                    'loaded_files': 0,
+                    'total_scans': 0,
+                    'loaded_scans': 0,
+                    'total_vulns': 0,
+                    'loaded_vulns': 0,
+                    'current_file': '',
+                    'status_message': 'Fetching file list...'
+                }
+                
                 # Fetch latest Trivy report files from Nexus
                 trivy_files = nexus_client.list_trivy_files()
                 logger.info(f"📦 Found {len(trivy_files)} Trivy report files in Nexus")
                 
-                projects = {}
-                scans = {}
+                app_data['loading_stats']['total_files'] = len(trivy_files)
+                
+                # Get file manifest for incremental detection
+                file_manifest = disk_cache.get_file_manifest()
+                current_file_paths = {tf['path'] for tf in trivy_files}
+                previous_file_paths = set(file_manifest.keys())
+                
+                # Detect changes
+                deleted_files = previous_file_paths - current_file_paths
+                new_files = current_file_paths - previous_file_paths
+                existing_files = current_file_paths & previous_file_paths
+                
+                logger.info(f"📊 Incremental update analysis:")
+                logger.info(f"   ➕ New files: {len(new_files)}")
+                logger.info(f"   📝 Modified files: (checking checksums...)")
+                logger.info(f"   ❌ Deleted files: {len(deleted_files)}")
+                
+                # Load existing data (only what we need)
+                projects = disk_cache.load_projects()
+                existing_scans = {}
                 vulnerabilities = {}
                 
+                # Normalize datetime fields in loaded projects (last_scan may be string from disk)
+                for project_name, project_data in projects.items():
+                    if project_data.get('last_scan') and isinstance(project_data['last_scan'], str):
+                        try:
+                            project_data['last_scan'] = datetime.fromisoformat(
+                                project_data['last_scan'].replace('Z', '+00:00')
+                            )
+                        except:
+                            project_data['last_scan'] = None
+                
+                # Load existing scans from disk cache
+                for project_name in list(projects.keys()):
+                    for scan_id in projects[project_name].get('scans', []):
+                        scan_data = disk_cache.load_scan(scan_id)
+                        if scan_data:
+                            existing_scans[scan_id] = scan_data
+                
+                # Handle deleted files - remove their scans and projects if empty
+                if deleted_files:
+                    for trivy_file in trivy_files:
+                        if trivy_file['path'] in deleted_files:
+                            project_name = trivy_file.get('project', 'Unknown')
+                            scan_id = f"{project_name}_{trivy_file.get('build_number', 'unknown')}"
+                            
+                            # Remove scan from project
+                            if project_name in projects:
+                                projects[project_name]['scans'] = [
+                                    s for s in projects[project_name].get('scans', []) 
+                                    if s != scan_id
+                                ]
+                                
+                                # Remove project if no scans left
+                                if not projects[project_name]['scans']:
+                                    logger.info(f"🗑️ Deleting project {project_name} (no scans remaining)")
+                                    disk_cache.delete_project(project_name)
+                                    del projects[project_name]
+                            
+                            # Remove scan data
+                            if scan_id in existing_scans:
+                                del existing_scans[scan_id]
+                
+                # Process only new/modified files
+                files_to_process = []
                 for trivy_file in trivy_files:
+                    if trivy_file['path'] in new_files:
+                        files_to_process.append((trivy_file, 'new'))
+                    elif trivy_file['path'] in existing_files:
+                        # Check if file has been modified (optional - can skip for performance)
+                        files_to_process.append((trivy_file, 'existing'))
+                
+                logger.info(f"⚡ Processing {len(files_to_process)} files (incremental mode)")
+                
+                scans = dict(existing_scans)  # Start with existing scans
+                
+                for idx, (trivy_file, file_status) in enumerate(files_to_process):
                     try:
+                        # Update loading progress
+                        app_data['loading_stats']['current_file'] = trivy_file.get('project', 'Unknown')
+                        app_data['loading_stats']['status_message'] = f"Processing file {idx+1}/{len(files_to_process)}: {trivy_file.get('project', 'Unknown')} ({file_status})"
+                        app_data['loading_stats']['loaded_files'] = idx + 1
+                        
                         # Download and parse Trivy report
                         trivy_content = nexus_client.download_trivy_report(trivy_file['path'])
                         
                         # Check if it's a Trivy report (skip if not)
                         if not trivy_parser.is_trivy_report(trivy_content):
                             logger.warning(f"⚠️ Skipping non-Trivy report file: {trivy_file['path']}")
+                            # Update manifest for this file
+                            disk_cache.update_file_manifest(trivy_file['path'], 'skipped')
                             continue
-                            
+                        
                         parsed_data = trivy_parser.parse_trivy_report(trivy_content)
                         
                         # Use project name from Trivy file
@@ -134,8 +236,7 @@ def refresh_data_background():
                                 'risk_score': 0
                             }
                         
-                        # Store scan data
-                        # Get branch name, defaulting to 'not provided' if None or not present
+                        # Get branch name
                         branch_name = trivy_file.get('branch_name', 'not provided')
                         if branch_name is None:
                             branch_name = 'not provided'
@@ -147,47 +248,52 @@ def refresh_data_background():
                             'branch_name': branch_name,
                             'timestamp': parsed_data['metadata']['timestamp'],
                             'trivy_report_path': trivy_file['path'],
-                            'vulnerabilities': parsed_data['vulnerabilities'],
+                            'vulnerability_count': len(parsed_data['vulnerabilities']),  # Store count only, not full objects
                             'components': parsed_data['components'],
                             'metadata': parsed_data['metadata']
                         }
                         
                         scans[scan_id] = scan_data
-                        projects[project_name]['scans'].append(scan_id)
+                        if scan_id not in projects[project_name]['scans']:
+                            projects[project_name]['scans'].append(scan_id)
+                        
+                        # Update loading stats
+                        app_data['loading_stats']['loaded_scans'] = len([s for s in scans.values() if s])
+                        app_data['loading_stats']['total_scans'] = len(scans)
                         
                         # Update project statistics with latest scan only
                         vuln_counts = analytics.count_vulnerabilities_by_severity(parsed_data['vulnerabilities'])
-                        
-                        # Use the CreatedAt timestamp from Trivy report to determine latest scan
                         scan_timestamp = parsed_data['metadata']['timestamp']
                         
+                        # Normalize timestamp for comparison (handle both datetime and string)
+                        last_scan = projects[project_name]['last_scan']
+                        if isinstance(last_scan, str):
+                            try:
+                                last_scan = datetime.fromisoformat(last_scan.replace('Z', '+00:00'))
+                            except:
+                                last_scan = None
+                        
                         # Only update if this is the latest scan for this project
-                        if (not projects[project_name]['last_scan'] or 
-                            scan_timestamp > projects[project_name]['last_scan']):
+                        if (not last_scan or scan_timestamp > last_scan):
                             projects[project_name]['critical_count'] = vuln_counts['critical']
                             projects[project_name]['high_count'] = vuln_counts['high']
                             projects[project_name]['medium_count'] = vuln_counts['medium']
                             projects[project_name]['low_count'] = vuln_counts['low']
                             projects[project_name]['total_vulnerabilities'] = vuln_counts['total']
-                            # Update branch name from latest scan
                             branch_name = trivy_file.get('branch_name')
                             projects[project_name]['branch_name'] = branch_name if branch_name else 'not provided'
-                        
-                        # Update last scan timestamp
-                        if (not projects[project_name]['last_scan'] or 
-                            scan_timestamp > projects[project_name]['last_scan']):
                             projects[project_name]['last_scan'] = scan_timestamp
                         
-                        # Store individual vulnerabilities
+                        # Update file manifest
+                        disk_cache.update_file_manifest(trivy_file['path'], hashlib.md5(str(scan_id).encode()).hexdigest())
+                        
+                        # ⚠️ SAVE VULNERABILITIES TO DISK ONLY (not in-memory)
+                        # Store vulnerabilities directly to disk cache, NOT in app_data
                         for vuln in parsed_data['vulnerabilities']:
-                            vuln_id = vuln['id']
-                            if vuln_id not in vulnerabilities:
-                                vulnerabilities[vuln_id] = []
-                            vulnerabilities[vuln_id].append({
-                                'scan_id': scan_id,
-                                'project': project_name,
-                                'details': vuln
-                            })
+                            vuln_id = vuln.get('id', '')
+                            disk_cache.save_vulnerability(vuln_id, scan_id, vuln)
+                        
+                        logger.info(f"✅ {file_status} file processed: {project_name} (scan {scan_id})")
                         
                     except Exception as e:
                         logger.error(f"❌ Error processing Trivy report file {trivy_file['path']}: {str(e)}")
@@ -202,30 +308,60 @@ def refresh_data_background():
                         project['low_count']
                     )
                 
-                # Save all data to disk cache
-                logger.info("💾 Saving data to disk cache...")
-                disk_cache.clear_all()  # Clear old data
-                disk_cache.save_projects(projects)
+                # ⚠️ IMPORTANT: Recalculate project statistics based on LATEST scan for each project
+                # This ensures vulnerability counts are always from the most recent scan
+                for project_name in projects.keys():
+                    project_scan_ids = projects[project_name].get('scans', [])
+                    if project_scan_ids:
+                        # Find the latest scan for this project
+                        latest_scan_id = None
+                        latest_timestamp = None
+                        
+                        for scan_id in project_scan_ids:
+                            if scan_id in scans:
+                                scan_timestamp = scans[scan_id].get('timestamp')
+                                if latest_timestamp is None or (scan_timestamp and scan_timestamp > latest_timestamp):
+                                    latest_timestamp = scan_timestamp
+                                    latest_scan_id = scan_id
+                        
+                        # Update project stats based on latest scan
+                        if latest_scan_id and latest_scan_id in scans:
+                            latest_scan = scans[latest_scan_id]
+                            # Load full scan data to get vulnerability details
+                            full_scan = disk_cache.load_scan(latest_scan_id)
+                            if full_scan and 'vulnerabilities' in full_scan:
+                                vuln_counts = analytics.count_vulnerabilities_by_severity(full_scan['vulnerabilities'])
+                                projects[project_name]['critical_count'] = vuln_counts['critical']
+                                projects[project_name]['high_count'] = vuln_counts['high']
+                                projects[project_name]['medium_count'] = vuln_counts['medium']
+                                projects[project_name]['low_count'] = vuln_counts['low']
+                                projects[project_name]['total_vulnerabilities'] = vuln_counts['total']
+                                projects[project_name]['last_scan'] = latest_timestamp
                 
-                # Save scans to disk
+                # Save updated data to disk (incremental save)
+                logger.info("💾 Saving updated data to disk cache...")
+                
+                # Save/update only modified projects
+                for project_name, project_data in projects.items():
+                    disk_cache.save_projects({project_name: project_data})
+                
+                # Save/update only new/modified scans (vulnerabilities already saved per-scan above)
                 for scan_id, scan_data in scans.items():
                     disk_cache.save_scan(scan_id, scan_data)
                 
-                # Save vulnerabilities to disk
-                for vuln_list in vulnerabilities.values():
-                    for vuln_item in vuln_list:
-                        vuln_id = vuln_item['details'].get('id', '')
-                        scan_id = vuln_item.get('scan_id', '')
-                        disk_cache.save_vulnerability(vuln_id, scan_id, vuln_item['details'])
-                
-                # Update global data (keep limited in-memory cache)
+                # Update global data (but NOT vulnerabilities - they stay on disk for lazy-load)
                 app_data['projects'] = projects
                 app_data['scans'] = scans
-                app_data['vulnerabilities'] = vulnerabilities
+                app_data['vulnerabilities'] = {}  # Keep empty - load on-demand from disk cache
                 app_data['last_updated'] = datetime.now()
                 app_data['is_loading'] = False
                 
-                logger.info(f"✅ Data refresh complete. Projects: {len(projects)}, Scans: {len(scans)}")
+                # Mark loading complete
+                app_data['loading_stats']['total_vulns'] = sum(p['total_vulnerabilities'] for p in projects.values())
+                app_data['loading_stats']['loaded_vulns'] = app_data['loading_stats']['total_vulns']
+                app_data['loading_stats']['status_message'] = f'✅ Complete! Loaded {len(scans)} scans with {app_data["loading_stats"]["total_vulns"]} unique vulnerabilities'
+                logger.info(f"✅ Data refresh complete (incremental, lazy-load). Projects: {len(projects)}, Scans: {len(scans)}")
+                logger.info(f"   Deleted: {len(deleted_files)} files, Processed: {len(files_to_process)} files")
                 
         except Exception as e:
             logger.error(f"❌ Error in background data refresh: {str(e)}")
@@ -399,6 +535,10 @@ def dashboard():
     """Main dashboard view"""
     logger.info("🏠 Rendering main dashboard")
     
+    # If data is still loading, redirect to loading status page
+    if app_data['is_loading']:
+        return redirect('/loading-status')
+    
     # Calculate summary statistics
     total_projects = len(app_data['projects'])
     total_scans = len(app_data['scans'])
@@ -407,14 +547,22 @@ def dashboard():
     # Critical issues (projects with critical vulnerabilities)
     critical_projects = [p for p in app_data['projects'].values() if p['critical_count'] > 0]
     
-    # Recent scans (last 24 hours)
+    # Recent scans (last 7 days) - get the most recent scans across all projects
     recent_scans = []
-    if app_data['last_updated']:
-        cutoff_time = datetime.now() - timedelta(hours=24)
-        recent_scans = [
-            s for s in app_data['scans'].values() 
-            if s['timestamp'] > cutoff_time
-        ]
+    if app_data['last_updated'] and app_data['scans']:
+        cutoff_time = datetime.now() - timedelta(days=7)
+        for s in app_data['scans'].values():
+            try:
+                scan_timestamp = s.get('timestamp')
+                # Handle both datetime objects and ISO string timestamps
+                if isinstance(scan_timestamp, str):
+                    scan_timestamp = datetime.fromisoformat(scan_timestamp.replace('Z', '+00:00'))
+                
+                if scan_timestamp and scan_timestamp > cutoff_time:
+                    recent_scans.append(s)
+            except (ValueError, TypeError):
+                # Skip scans with unparseable timestamps
+                continue
     
     return render_template('dashboard.html',
         total_projects=total_projects,
@@ -425,6 +573,12 @@ def dashboard():
         last_updated=format_timestamp(app_data['last_updated']),
         is_loading=app_data['is_loading']
     )
+
+@app.route('/loading-status')
+def loading_status_page():
+    """Real-time loading status page"""
+    logger.info("📊 Rendering loading status page")
+    return render_template('loading_status.html')
 
 @app.route('/projects')
 def projects():
@@ -499,13 +653,11 @@ def scan_detail(scan_id):
     # Try to get scan from in-memory cache first, then disk cache
     scan = None
     if scan_id in app_data['scans']:
-        scan = app_data['scans'][scan_id]
+        scan = app_data['scans'][scan_id].copy()
     else:
         # Load from disk cache
         scan = disk_cache.load_scan(scan_id)
-        if scan:
-            app_data['scans'][scan_id] = scan
-        else:
+        if not scan:
             return "Scan not found", 404
     
     # Get pagination parameters
@@ -514,8 +666,17 @@ def scan_detail(scan_id):
     severity_filter = request.args.get('severity', '').upper()
     cve_search = request.args.get('cve_search', '').strip().upper()
     
+    # ⚠️ LAZY-LOAD: Only load vulnerabilities from disk cache when needed
+    vulnerabilities = []
+    if 'vulnerabilities' not in scan or scan['vulnerabilities'] is None:
+        logger.debug(f"💾 Lazy-loading vulnerabilities for scan {scan_id} from disk cache...")
+        full_scan = disk_cache.load_scan(scan_id)
+        if full_scan and 'vulnerabilities' in full_scan:
+            vulnerabilities = full_scan['vulnerabilities']
+    else:
+        vulnerabilities = scan.get('vulnerabilities', [])
+    
     # Filter vulnerabilities by severity if specified
-    vulnerabilities = scan['vulnerabilities']
     if severity_filter and severity_filter in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']:
         vulnerabilities = [v for v in vulnerabilities if v.get('severity', '').upper() == severity_filter]
     
@@ -534,14 +695,14 @@ def scan_detail(scan_id):
     has_prev = page > 1
     has_next = page < total_pages
     
-    # Group vulnerabilities by severity (for summary cards)
-    vuln_by_severity = analytics.group_vulnerabilities_by_severity(scan['vulnerabilities'])
+    # Group vulnerabilities by severity (for summary cards) - use lazy-loaded vulns
+    vuln_by_severity = analytics.group_vulnerabilities_by_severity(vulnerabilities)
     
-    # Calculate risk score for this scan
-    risk_score = analytics.calculate_risk_score(scan['vulnerabilities'])
+    # Calculate risk score for this scan - use lazy-loaded vulns
+    risk_score = analytics.calculate_risk_score(vulnerabilities)
     
     # Get component analysis
-    component_analysis = analytics.analyze_components(scan['components'])
+    component_analysis = analytics.analyze_components(scan.get('components', []))
     
     # Add calculated fields to scan data for template
     scan_with_calculated = scan.copy()
@@ -571,18 +732,24 @@ def vulnerability_detail(scan_id, vuln_id):
     # Try to get scan from in-memory cache first, then disk cache
     scan = None
     if scan_id in app_data['scans']:
-        scan = app_data['scans'][scan_id]
+        scan = app_data['scans'][scan_id].copy()
     else:
         # Load from disk cache
         scan = disk_cache.load_scan(scan_id)
-        if scan:
-            app_data['scans'][scan_id] = scan
-        else:
+        if not scan:
             return "Scan not found", 404
+    
+    # ⚠️ LAZY-LOAD: Load full scan data with vulnerabilities only when needed
+    if 'vulnerabilities' not in scan or scan['vulnerabilities'] is None:
+        logger.debug(f"💾 Lazy-loading full scan data for {scan_id} from disk cache...")
+        full_scan = disk_cache.load_scan(scan_id)
+        if full_scan:
+            scan = full_scan
     
     # Find the vulnerability
     vulnerability = None
-    for vuln in scan['vulnerabilities']:
+    vulnerabilities = scan.get('vulnerabilities', [])
+    for vuln in vulnerabilities:
         if vuln.get('id') == vuln_id:
             vulnerability = vuln
             break
@@ -691,19 +858,27 @@ def api_top_vulnerabilities():
     """API endpoint for most common vulnerabilities"""
     logger.info("🔌 API: Top vulnerabilities requested")
     
-    # Count vulnerability occurrences across all scans
+    # Count vulnerability occurrences across all scans (rebuild from scans, not from app_data)
     vuln_counts = {}
-    for vuln_id, occurrences in app_data['vulnerabilities'].items():
-        vuln_counts[vuln_id] = {
-            'count': len(occurrences),
-            'severity': occurrences[0]['details']['severity'],
-            'description': occurrences[0]['details'].get('description', 'N/A'),
-            'projects_affected': len(set(occ['project'] for occ in occurrences))
-        }
+    for scan_id, scan in app_data['scans'].items():
+        # Load vulnerabilities from disk cache for this scan
+        full_scan = disk_cache.load_scan(scan_id)
+        if full_scan and 'vulnerabilities' in full_scan:
+            for vuln in full_scan['vulnerabilities']:
+                vuln_id = vuln.get('id', 'unknown')
+                if vuln_id not in vuln_counts:
+                    vuln_counts[vuln_id] = {
+                        'severity': vuln.get('severity', 'unknown'),
+                        'description': vuln.get('description', 'N/A'),
+                        'count': 0,
+                        'projects': set()
+                    }
+                vuln_counts[vuln_id]['count'] += 1
+                vuln_counts[vuln_id]['projects'].add(scan.get('project', 'unknown'))
     
     # Sort by count and return top 20
     top_vulns = sorted(
-        vuln_counts.items(),
+        [(vuln_id, data) for vuln_id, data in vuln_counts.items()],
         key=lambda x: x[1]['count'],
         reverse=True
     )[:20]
@@ -715,7 +890,7 @@ def api_top_vulnerabilities():
                 'count': data['count'],
                 'severity': data['severity'],
                 'description': data['description'],
-                'projects_affected': data['projects_affected']
+                'projects_affected': len(data['projects'])
             }
             for vuln_id, data in top_vulns
         ]
@@ -764,7 +939,32 @@ def health_check():
         'cache': cache_stats
     })
 
-@app.route('/api/cache/stats')
+@app.route('/api/loading-stats')
+def loading_stats():
+    """Get real-time loading statistics"""
+    stats = app_data['loading_stats'].copy()
+    stats['is_loading'] = app_data['is_loading']
+    stats['timestamp'] = datetime.now().isoformat()
+    
+    # Calculate progress percentages
+    if stats['total_files'] > 0:
+        stats['files_progress'] = (stats['loaded_files'] / stats['total_files']) * 100
+    else:
+        stats['files_progress'] = 0
+    
+    if stats['total_scans'] > 0:
+        stats['scans_progress'] = (stats['loaded_scans'] / stats['total_scans']) * 100
+    else:
+        stats['scans_progress'] = 0
+    
+    if stats['total_vulns'] > 0:
+        stats['vulns_progress'] = (stats['loaded_vulns'] / stats['total_vulns']) * 100
+    else:
+        stats['vulns_progress'] = 0
+    
+    return jsonify(stats)
+
+@app.route('/cache/stats')
 def cache_stats():
     """Get detailed cache statistics"""
     logger.info("📊 Cache statistics requested")

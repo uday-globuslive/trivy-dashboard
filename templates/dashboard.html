@@ -78,6 +78,33 @@
     </div>
 </div>
 
+<!-- Data Status Card -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            📊 Data Status
+                        </div>
+                        <div id="data-status-message">
+                            <small class="text-muted">Last Updated: <span id="last-update-time">{{ last_updated }}</span></small>
+                            <br>
+                            <small id="status-indicator">✅ All data loaded and ready</small>
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <a href="/loading-status" class="btn btn-sm btn-info">
+                            <i class="fas fa-sync-alt"></i> View Loading Status
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Charts Row -->
 <div class="row mb-4">
     <!-- Vulnerability Trends Chart -->

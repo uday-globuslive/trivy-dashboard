@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Loading Status - Trivy Dashboard</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+</head>
+<body>
+<nav class="navbar navbar-dark bg-dark">
+    <a class="navbar-brand" href="/">🔒 Trivy Security Dashboard</a>
+</nav>
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8 offset-md-2">
+            <h1>📊 Real-time Loading Status</h1>
+            <p class="text-muted">Monitor the progress of data loading from Nexus Repository</p>
+            <div class="alert alert-primary" role="alert">
+                <strong>✓ Status Page Loaded</strong> - Fetching stats from API...
+            </div>
+            
+            <div id="loading-container">
+                <!-- Loading status will be populated here -->
+                <div class="alert alert-info">
+                    <strong>Loading status...</strong> Fetching current progress...
+                </div>
+            </div>
+            
+            <!-- Status Details -->
+            <div class="card mt-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">📈 Progress Overview</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <strong>Files Processed:</strong>
+                            <div class="progress">
+                                <div id="files-progress" class="progress-bar bg-success" role="progressbar" 
+                                     style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                                    <span id="files-text">0/0</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <strong>Scans Loaded:</strong>
+                            <div class="progress">
+                                <div id="scans-progress" class="progress-bar bg-info" role="progressbar" 
+                                     style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                                    <span id="scans-text">0/0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <strong>Vulnerabilities Found:</strong>
+                            <div class="progress">
+                                <div id="vulns-progress" class="progress-bar bg-warning" role="progressbar" 
+                                     style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                                    <span id="vulns-text">0/0</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <strong>Status:</strong>
+                            <p id="status-message" class="mt-2">
+                                <span class="badge badge-secondary">Idle</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Current File -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="mb-0">🔄 Currently Processing</h5>
+                </div>
+                <div class="card-body">
+                    <p id="current-file" class="mb-0">
+                        <code>Waiting for data...</code>
+                    </p>
+                </div>
+            </div>
+            
+            <!-- Statistics -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="mb-0">📊 Statistics</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-4">
+                            <h6>Files</h6>
+                            <h3 id="total-files" class="text-primary">0</h3>
+                            <small class="text-muted">Total Trivy Reports</small>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Scans</h6>
+                            <h3 id="total-scans" class="text-info">0</h3>
+                            <small class="text-muted">Security Scans</small>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Vulnerabilities</h6>
+                            <h3 id="total-vulns" class="text-warning">0</h3>
+                            <small class="text-muted">Unique Issues Found</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Navigation -->
+            <div class="mt-4">
+                <a href="/" class="btn btn-primary">← Back to Dashboard</a>
+                <span id="auto-redirect-message" style="display: none; margin-left: 20px; color: #28a745;">
+                    <i class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></i> 
+                    Redirecting to dashboard in <span id="redirect-countdown">3</span>s...
+                </span>
+            </div>
+            
+            <!-- Auto-refresh info -->
+            <div class="alert alert-info mt-3">
+                <small>ℹ️ Status updates every 10 seconds for production efficiency. The dashboard automatically redirects when loading completes.</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .progress {
+        height: 25px;
+        margin-top: 5px;
+    }
+    
+    .progress-bar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        color: white;
+        font-weight: bold;
+    }
+    
+    .card {
+        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+        border: 1px solid #dee2e6;
+    }
+    
+    .card-header {
+        background-color: #f8f9fa;
+        border-bottom: 1px solid #dee2e6;
+    }
+    
+    #current-file {
+        font-size: 14px;
+        word-break: break-all;
+        background-color: #f8f9fa;
+        padding: 10px;
+        border-radius: 4px;
+    }
+</style>
+
+<script>
+    let updateInterval;
+    let redirectCountdown = 3;
+    
+    function updateLoadingStatus() {
+        fetch('/api/loading-stats')
+            .then(response => response.json())
+            .then(data => {
+                // Update status message
+                const statusBadge = document.getElementById('status-message');
+                if (data.is_loading) {
+                    statusBadge.innerHTML = '<span class="badge badge-warning">⚙️ Loading...</span>';
+                } else {
+                    if (data.status_message && data.status_message.includes('✅')) {
+                        statusBadge.innerHTML = '<span class="badge badge-success">✅ Complete</span>';
+                    } else {
+                        statusBadge.innerHTML = '<span class="badge badge-secondary">Idle</span>';
+                    }
+                }
+                
+                // Update progress bars
+                const filesPercent = Math.min(100, data.files_progress || 0);
+                const scansPercent = Math.min(100, data.scans_progress || 0);
+                const vulnsPercent = Math.min(100, data.vulns_progress || 0);
+                
+                document.getElementById('files-progress').style.width = filesPercent + '%';
+                document.getElementById('files-progress').textContent = `${data.loaded_files}/${data.total_files}`;
+                document.getElementById('files-text').textContent = `${data.loaded_files}/${data.total_files}`;
+                
+                document.getElementById('scans-progress').style.width = scansPercent + '%';
+                document.getElementById('scans-progress').textContent = `${data.loaded_scans}/${data.total_scans}`;
+                document.getElementById('scans-text').textContent = `${data.loaded_scans}/${data.total_scans}`;
+                
+                document.getElementById('vulns-progress').style.width = vulnsPercent + '%';
+                document.getElementById('vulns-progress').textContent = `${data.loaded_vulns}/${data.total_vulns}`;
+                document.getElementById('vulns-text').textContent = `${data.loaded_vulns}/${data.total_vulns}`;
+                
+                // Update current file
+                document.getElementById('current-file').textContent = 
+                    data.current_file || 'Waiting for data...';
+                
+                // Update statistics
+                document.getElementById('total-files').textContent = data.total_files;
+                document.getElementById('total-scans').textContent = data.total_scans;
+                document.getElementById('total-vulns').textContent = data.total_vulns;
+                
+                // Show custom status message
+                if (data.status_message) {
+                    const customMessage = document.querySelector('.alert-info');
+                    if (customMessage && !data.is_loading) {
+                        customMessage.innerHTML = `<small>${data.status_message} | Status updates every 10 seconds for production efficiency.</small>`;
+                    }
+                }
+                
+                // If loading completed, show auto-redirect message and redirect after countdown
+                if (!data.is_loading && data.status_message && data.status_message.includes('✅')) {
+                    clearInterval(updateInterval);
+                    
+                    const redirectMsg = document.getElementById('auto-redirect-message');
+                    if (redirectMsg) {
+                        redirectMsg.style.display = 'inline';
+                        
+                        // Start countdown
+                        let countdown = 3;
+                        const countdownInterval = setInterval(() => {
+                            countdown--;
+                            document.getElementById('redirect-countdown').textContent = countdown;
+                            
+                            if (countdown <= 0) {
+                                clearInterval(countdownInterval);
+                                // Redirect to dashboard
+                                window.location.href = '/';
+                            }
+                        }, 1000);
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching loading status:', error);
+            });
+    }
+    
+    // Initial update
+    updateLoadingStatus();
+    
+    // Update every 10 seconds (production-appropriate frequency)
+    updateInterval = setInterval(updateLoadingStatus, 10000);
+    
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+        clearInterval(updateInterval);
+    });
+</script>
+
+</body>
+</html>
