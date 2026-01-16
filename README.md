@@ -187,6 +187,11 @@ docker run -d \
   trivy-dashboard:latest
 ```
 
+### With memory restrictions
+```
+docker run -d --name trivydashboard -p 5000:5000 --env-file data/.env   --memory=512m --memory-swap=40g localhost/trivydashboard:1.0
+```
+
 ### Docker Compose
 
 ```yaml
