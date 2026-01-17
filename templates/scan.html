@@ -78,11 +78,11 @@
                     <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Vulnerabilities</h5>
                 </div>
                 <div class="row g-2">
-                    <div class="col-12 col-md-4">
+                    <div class="col-12 col-md-3">
                         <input type="text" class="form-control form-control-sm" id="cveSearch" placeholder="Search CVE (e.g., CVE-2021-1234)" value="{{ cve_search }}" onkeyup="searchByCVE(event)">
                         <small class="text-muted">Press Enter to search</small>
                     </div>
-                    <div class="col-12 col-md-4">
+                    <div class="col-12 col-md-3">
                         <!-- Severity Filter -->
                         <select class="form-select form-select-sm" onchange="filterBySeverity(this.value)">
                             <option value="">All Severities</option>
@@ -92,7 +92,16 @@
                             <option value="low" {{ 'selected' if severity_filter == 'low' }}>Low</option>
                         </select>
                     </div>
-                    <div class="col-12 col-md-4">
+                    <div class="col-12 col-md-3">
+                        <!-- Component Filter -->
+                        <select class="form-select form-select-sm" onchange="filterByComponent(this.value)">
+                            <option value="">All Components</option>
+                            {% for component in unique_components %}
+                            <option value="{{ component }}" {{ 'selected' if component_filter == component }}>{{ component }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-3">
                         <!-- Per Page Select -->
                         <select class="form-select form-select-sm" onchange="changePerPage(this.value)">
                             <option value="25" {{ 'selected' if per_page == 25 }}>25 per page</option>
@@ -110,7 +119,8 @@
                             <tr>
                                 <th>CVE ID</th>
                                 <th>Severity</th>
-                                <th>Component</th>
+                                <th>Detected in Component</th>
+                                <th>Package</th>
                                 <th>CVSS Score</th>
                                 <th>Description</th>
                             </tr>
@@ -129,14 +139,23 @@
                                     </span>
                                 </td>
                                 <td>
-                                    {% if vuln.affects %}
-                                        {% if vuln.affects is string %}
-                                            {{ vuln.affects }}
-                                        {% else %}
-                                            {{ vuln.affects|length }} components
+                                    {% set component_name = vuln.properties.target if vuln.properties and vuln.properties.target else '' %}
+                                    {% if component_name %}
+                                    <small>
+                                        <strong>{{ component_name }}</strong>
+                                        {% if vuln.properties and vuln.properties.installed_version %}
+                                        <br><span class="text-muted">v{{ vuln.properties.installed_version }}</span>
                                         {% endif %}
+                                    </small>
                                     {% else %}
-                                        N/A
+                                    <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if vuln.properties and vuln.properties.package_name %}
+                                    <small>{{ vuln.properties.package_name }}</small>
+                                    {% else %}
+                                    <span class="text-muted">-</span>
                                     {% endif %}
                                 </td>
                                 <td>{{ vuln.score or 'N/A' }}</td>
@@ -167,10 +186,10 @@
                     <nav aria-label="Vulnerability pagination">
                         <ul class="pagination pagination-sm mb-0">
                             <li class="page-item {{ 'disabled' if not has_prev }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=1, per_page=per_page, severity=severity_filter, cve_search=cve_search) if has_prev else '#' }}">First</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=1, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter) if has_prev else '#' }}">First</a>
                             </li>
                             <li class="page-item {{ 'disabled' if not has_prev }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page-1, per_page=per_page, severity=severity_filter, cve_search=cve_search) if has_prev else '#' }}">Previous</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page-1, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter) if has_prev else '#' }}">Previous</a>
                             </li>
                             
                             {% set start_page = [1, page - 2]|max %}
@@ -182,7 +201,7 @@
                             
                             {% for p in range(start_page, end_page + 1) %}
                                 <li class="page-item {{ 'active' if p == page }}">
-                                    <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=p, per_page=per_page, severity=severity_filter, cve_search=cve_search) }}">{{ p }}</a>
+                                    <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=p, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter) }}">{{ p }}</a>
                                 </li>
                             {% endfor %}
                             
@@ -191,10 +210,10 @@
                             {% endif %}
                             
                             <li class="page-item {{ 'disabled' if not has_next }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page+1, per_page=per_page, severity=severity_filter, cve_search=cve_search) if has_next else '#' }}">Next</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page+1, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter) if has_next else '#' }}">Next</a>
                             </li>
                             <li class="page-item {{ 'disabled' if not has_next }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=total_pages, per_page=per_page, severity=severity_filter, cve_search=cve_search) if has_next else '#' }}">Last</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=total_pages, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter) if has_next else '#' }}">Last</a>
                             </li>
                         </ul>
                     </nav>
@@ -284,6 +303,17 @@ function filterBySeverity(severity) {
         url.searchParams.set('severity', severity);
     } else {
         url.searchParams.delete('severity');
+    }
+    url.searchParams.set('page', '1'); // Reset to first page
+    window.location.href = url.toString();
+}
+
+function filterByComponent(component) {
+    const url = new URL(window.location);
+    if (component) {
+        url.searchParams.set('component', component);
+    } else {
+        url.searchParams.delete('component');
     }
     url.searchParams.set('page', '1'); // Reset to first page
     window.location.href = url.toString();

@@ -496,6 +496,7 @@ def scan_detail(scan_id):
     per_page = request.args.get('per_page', 50, type=int)
     severity_filter = request.args.get('severity', '').upper()
     cve_search = request.args.get('cve_search', '').strip().upper()
+    component_filter = request.args.get('component', '').strip()
     
     # Filter vulnerabilities by severity if specified
     vulnerabilities = scan['vulnerabilities']
@@ -505,6 +506,10 @@ def scan_detail(scan_id):
     # Filter vulnerabilities by CVE if specified
     if cve_search:
         vulnerabilities = [v for v in vulnerabilities if cve_search in v.get('id', '').upper()]
+    
+    # Filter vulnerabilities by component if specified
+    if component_filter:
+        vulnerabilities = [v for v in vulnerabilities if component_filter.lower() in v.get('properties', {}).get('target', '').lower()]
     
     # Calculate pagination
     total_vulns = len(vulnerabilities)
@@ -526,6 +531,14 @@ def scan_detail(scan_id):
     # Get component analysis
     component_analysis = analytics.analyze_components(scan['components'])
     
+    # Extract unique components from vulnerabilities for filter dropdown
+    unique_components = set()
+    for vuln in scan['vulnerabilities']:
+        target = vuln.get('properties', {}).get('target', '')
+        if target:
+            unique_components.add(target)
+    unique_components = sorted(list(unique_components))
+    
     # Add calculated fields to scan data for template
     scan_with_calculated = scan.copy()
     scan_with_calculated['risk_score'] = risk_score
@@ -543,7 +556,9 @@ def scan_detail(scan_id):
         has_prev=has_prev,
         has_next=has_next,
         severity_filter=severity_filter.lower() if severity_filter else '',
-        cve_search=cve_search
+        cve_search=cve_search,
+        component_filter=component_filter,
+        unique_components=unique_components
     )
 
 @app.route('/scan/<scan_id>/vulnerability/<vuln_id>')
@@ -1096,10 +1111,11 @@ def _export_vulnerabilities_pdf(scan):
     content.append(Spacer(1, 0.1*inch))
     
     # Prepare vulnerability data
-    vuln_data = [['CVE ID', 'Severity', 'Package', 'Installed Ver', 'Fixed Ver']]
+    vuln_data = [['CVE ID', 'Severity', 'Detected in Component', 'Package', 'Installed Ver', 'Fixed Ver']]
     
     for vuln in vulnerabilities:
         severity = vuln.get('severity', 'UNKNOWN').upper()
+        component = vuln.get('properties', {}).get('target', 'N/A')
         package_name = vuln.get('properties', {}).get('package_name', 'Unknown')
         installed_ver = vuln.get('properties', {}).get('installed_version', 'N/A')
         fixed_ver = vuln.get('properties', {}).get('fixed_version', 'N/A')
@@ -1107,6 +1123,7 @@ def _export_vulnerabilities_pdf(scan):
         # Wrap text in Paragraph objects to enable wrapping
         cve_para = Paragraph(vuln.get('id', 'N/A'), styles['Normal'])
         severity_para = Paragraph(severity, styles['Normal'])
+        component_para = Paragraph(str(component), styles['Normal'])
         package_para = Paragraph(str(package_name), styles['Normal'])
         installed_para = Paragraph(str(installed_ver), styles['Normal'])
         fixed_para = Paragraph(str(fixed_ver), styles['Normal'])
@@ -1114,6 +1131,7 @@ def _export_vulnerabilities_pdf(scan):
         vuln_data.append([
             cve_para,
             severity_para,
+            component_para,
             package_para,
             installed_para,
             fixed_para,
@@ -1121,7 +1139,7 @@ def _export_vulnerabilities_pdf(scan):
     
     # Create vulnerability table
     if len(vuln_data) > 1:
-        vuln_table = Table(vuln_data, colWidths=[1.3*inch, 0.9*inch, 1.8*inch, 1.5*inch, 1.5*inch])
+        vuln_table = Table(vuln_data, colWidths=[1.2*inch, 0.9*inch, 1.5*inch, 1.5*inch, 1.3*inch, 1.3*inch])
         vuln_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a237e')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -1219,6 +1237,7 @@ def _export_vulnerabilities_csv(scan):
     writer.writerow([
         'CVE ID',
         'Severity',
+        'Detected in Component',
         'Package Name',
         'Installed Version',
         'Fixed Version'
@@ -1229,6 +1248,7 @@ def _export_vulnerabilities_csv(scan):
         writer.writerow([
             vuln.get('id', 'N/A'),
             vuln.get('severity', 'UNKNOWN'),
+            vuln.get('properties', {}).get('target', 'N/A'),
             vuln.get('properties', {}).get('package_name', 'Unknown'),
             vuln.get('properties', {}).get('installed_version', 'N/A'),
             vuln.get('properties', {}).get('fixed_version', 'N/A'),
