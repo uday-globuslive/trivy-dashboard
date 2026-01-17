@@ -170,6 +170,119 @@ LOG_LEVEL=INFO
 
 ## 🐳 Docker Deployment
 
+### Image Build and spin-up container on build machine
+```bash
+#!/bin/bash
+
+echo "===== Starting beslow script ====="
+echo "Current directory: $(pwd)"
+echo "Timestamp: $(date)"
+
+echo ""
+echo "----- Pre-cleanup: All Containers -----"
+docker ps -a
+CONTAINER_IDS=$(docker ps -a | grep trivydashboard | awk '{print $1}')
+if [ -z "$CONTAINER_IDS" ]; then
+  echo "No trivydashboard containers found."
+else
+  echo "Found container IDs: $CONTAINER_IDS"
+fi
+
+echo ""
+echo "----- Stopping trivydashboard containers -----"
+if [ -n "$CONTAINER_IDS" ]; then
+  docker stop $CONTAINER_IDS
+  STOP_EXIT=$?
+  if [ $STOP_EXIT -eq 0 ]; then
+    echo "Containers stopped successfully."
+  else
+    echo "Stop command failed (exit $STOP_EXIT)."
+  fi
+else
+  echo "No containers to stop."
+fi
+
+echo ""
+echo "----- Deleting trivydashboard containers -----"
+docker rm $CONTAINER_IDS 2>/dev/null || echo "No containers left to delete or already gone."
+echo "----- Post-container cleanup: All Containers -----"
+docker ps -a
+
+echo ""
+echo "----- Pre-cleanup: All Images -----"
+docker images
+IMAGE_IDS=$(docker images | grep trivydashboard | awk '{print $3}')
+if [ -z "$IMAGE_IDS" ]; then
+  echo "No trivydashboard images found."
+else
+  echo "Found image IDs/digests: $IMAGE_IDS"
+fi
+
+echo ""
+echo "----- Deleting trivydashboard images -----"
+if [ -n "$IMAGE_IDS" ]; then
+  docker rmi -f $IMAGE_IDS
+  RMI_EXIT=$?
+  if [ $RMI_EXIT -eq 0 ]; then
+    echo "Images deleted successfully."
+  else
+    echo "Image removal failed (exit $RMI_EXIT)."
+  fi
+else
+  echo "No images to delete."
+fi
+
+echo ""
+echo "----- Post-image cleanup: All Images -----"
+docker images
+
+echo ""
+echo "----- Pulling latest code -----"
+cd trivydashboard || { echo "Failed to cd to trivydashboard"; exit 1; }
+echo "Current branch: $(git branch --show-current)"
+git pull origin test
+PULL_EXIT=$?
+if [ $PULL_EXIT -eq 0 ]; then
+  echo "Git pull successful."
+else
+  echo "Git pull failed (exit $PULL_EXIT)."
+fi
+
+echo ""
+echo "----- Building new trivydashboard:test image -----"
+docker build -t trivydashboard:test .
+BUILD_EXIT=$?
+if [ $BUILD_EXIT -eq 0 ]; then
+  echo "Build successful."
+else
+  echo "Build failed (exit $BUILD_EXIT)."
+fi
+docker images | grep trivydashboard || echo "No trivydashboard images found after build."
+
+echo ""
+echo "----- Creating and starting new container -----"
+cd .. || echo "Warning: Failed to cd .."
+echo "Running: docker run -d --name trivydashboardcontainer -p 5000:5000 --env-file data/.env --memory=512m --memory-swap=40g localhost/trivydashboard:test"
+docker run -d --name trivydashboardcontainer -p 5000:5000 --env-file data/.env --memory=512m --memory-swap=40g localhost/trivydashboard:test
+RUN_EXIT=$?
+if [ $RUN_EXIT -eq 0 ]; then
+  echo "Container started successfully."
+else
+  echo "Container run failed (exit $RUN_EXIT)."
+fi
+
+echo ""
+echo "----- Final status -----"
+docker ps | grep trivydashboard || echo "No running trivydashboard containers."
+echo "Container logs (last 10 lines):"
+docker logs trivydashboardcontainer --tail=10 2>/dev/null || echo "No logs available or container not running."
+
+echo ""
+echo "===== beslow script completed ====="
+
+```
+
+
 ### Docker Run
 
 ```bash
@@ -477,3 +590,4 @@ For issues or questions:
 ---
 
 **Happy scanning! 🛡️**
+
