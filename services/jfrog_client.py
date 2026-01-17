@@ -60,13 +60,12 @@ class JFrogClient:
         sbom_files = []
         try:
             # Use AQL (Artifactory Query Language) to search for files
+            # Build AQL query - supports both Maven-style and nested structures
+            # Only filter by filename, as path structure varies greatly
             aql_query = {
                 "repo": self.repository,
                 "type": "file",
-                "$and": [
-                    {"name": {"$match": f"*{Config.JFROG_ARTIFACT_SUFFIX}.{Config.JFROG_ASSET_EXTENSION}"}},
-                    {"path": {"$match": f"{Config.JFROG_GROUP_ID.replace('.', '/')}/*"}}
-                ]
+                "name": {"$match": f"*{Config.JFROG_ARTIFACT_SUFFIX}.{Config.JFROG_ASSET_EXTENSION}"}
             }
             
             # Convert AQL query to proper format
@@ -105,22 +104,28 @@ class JFrogClient:
                         logger.debug(f"⏭️ Skipping non-Trivy-report file: {asset_name}")
                         continue
                     
-                    # Parse Maven path structure: com/company/{artifactId}/{version}/{filename}
+                    # Parse path structure - supports both:
+                    # 1. Maven style: com/company/{artifactId}/{version}/{filename}
+                    # 2. Nested style: {repo}/{domain}/{group}/{artifactId}/{version}/{filename}
                     path_parts = full_path.split('/')
                     if len(path_parts) < 4:
                         logger.debug(f"⏭️ Skipping asset with insufficient path parts: {full_path}")
                         continue
                     
-                    # Extract components from path
-                    group_parts = path_parts[:-3]  # ['com', 'company']
-                    artifact_id = path_parts[-3]   # e.g., 'project_name'
+                    # Extract components from path - last 3 parts are always: artifactId/version/filename
+                    artifact_id = path_parts[-3]   # e.g., 'project_name' or 'Mart_Trivy_Scan.sbom'
                     version = path_parts[-2]       # e.g., '1.0.0-20250924044857'
                     filename = path_parts[-1]      # e.g., 'project_name-1.0.0-20250924044857-trivy-report.json'
                     
-                    logger.debug(f"📦 Parsed: artifact={artifact_id}, version={version}, filename={filename}")
+                    # Try to extract project name from filename pattern
+                    # Filename pattern: {project}-{version}-trivy-report.json
+                    project_name = self._extract_project_name_from_filename(filename, artifact_id)
                     
-                    # For Trivy reports, project name is the artifact_id directly
-                    project_name = artifact_id
+                    # Get group parts (everything before artifact_id)
+                    group_parts = path_parts[:-3]
+                    group_id = '/'.join(group_parts) if group_parts else ''
+                    
+                    logger.debug(f"📦 Parsed: project={project_name}, artifact={artifact_id}, version={version}, filename={filename}, group={group_id}")
                     
                     # Extract build number from version (timestamp part)
                     build_number = self._extract_build_number(version)
@@ -318,6 +323,56 @@ class JFrogClient:
         except Exception as e:
             logger.error(f"❌ Error searching Trivy report files for project {project_name}: {str(e)}")
             return []
+    
+    def _extract_project_name_from_filename(self, filename, artifact_id):
+        """Extract project name from filename or use artifact_id as fallback
+        
+        Tries to extract the base project name from patterns like:
+        - project-name-1.0.0-20250924044857-trivy-report.json
+        - Mart_Trivy_Scan.sbom-1.0.0-20260117120815-15.2_GA_Release-trivy-report.json
+        
+        Args:
+            filename: The filename string
+            artifact_id: The artifact ID as fallback
+            
+        Returns:
+            str: Extracted project name or artifact_id if extraction fails
+        """
+        try:
+            # Remove the -trivy-report suffix and extension
+            base_name = filename.replace('-trivy-report.json', '').replace('-trivy-report', '')
+            
+            # Try to remove the version pattern (everything after the last occurrence of a version-like pattern)
+            # Version patterns: 1.0.0-TIMESTAMP or similar
+            version_pattern = r'-\d+\.\d+\.\d+-\d+'
+            match = re.search(version_pattern, base_name)
+            if match:
+                # Extract everything before the version
+                project_name = base_name[:match.start()]
+                if project_name:
+                    logger.debug(f"📦 Extracted project name '{project_name}' from filename '{filename}'")
+                    return project_name
+            
+            # Fallback: if no version pattern found, try to split by last dash
+            if '-' in base_name:
+                # For nested structure like: Mart_Trivy_Scan.sbom-1.0.0-...
+                # We want: Mart_Trivy_Scan.sbom
+                parts = base_name.split('-')
+                # Find where the version starts (digits.digits.digits)
+                for i, part in enumerate(parts):
+                    if re.match(r'^\d+\.\d+\.\d+', part):
+                        project_name = '-'.join(parts[:i])
+                        if project_name:
+                            logger.debug(f"📦 Extracted project name '{project_name}' from filename '{filename}' (version found at part {i})")
+                            return project_name
+            
+            # Ultimate fallback: use artifact_id
+            logger.debug(f"📦 Using artifact_id as project name: {artifact_id}")
+            return artifact_id
+            
+        except Exception as e:
+            logger.debug(f"Error extracting project name from '{filename}': {str(e)}, using artifact_id")
+            return artifact_id
     
     def _extract_build_number(self, version_string):
         """Extract build number from version string (handles patterns like 1.0.0-20250521034211)"""
