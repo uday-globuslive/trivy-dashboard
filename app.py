@@ -112,12 +112,20 @@ def refresh_data_background():
                         
                         # Use project name from Trivy file
                         project_name = trivy_file['project']
-                        scan_id = f"{project_name}_{trivy_file['build_number']}"
+                        # Include folder path (group_id) in project identifier to handle duplicates
+                        # Replace / with ~ to make it URL-safe for Flask routing
+                        folder_path = trivy_file.get('group_id', '')
+                        folder_path_safe = folder_path.replace('/', '~') if folder_path else ''
+                        project_key = f"{folder_path_safe}|{project_name}" if folder_path_safe else project_name
+                        scan_id = f"{project_key}_{trivy_file['build_number']}"
                         
                         # Store project data
-                        if project_name not in projects:
-                            projects[project_name] = {
+                        if project_key not in projects:
+                            projects[project_key] = {
                                 'name': project_name,
+                                'folder_path': folder_path,  # Store original folder path for display
+                                'folder_path_safe': folder_path_safe,  # Store safe version for routing
+                                'project_key': project_key,
                                 'scans': [],
                                 'total_vulnerabilities': 0,
                                 'critical_count': 0,
@@ -138,6 +146,7 @@ def refresh_data_background():
                         scan_data = {
                             'id': scan_id,
                             'project': project_name,
+                            'project_key': project_key,
                             'build_number': trivy_file['build_number'],
                             'branch_name': branch_name,
                             'timestamp': parsed_data['metadata']['timestamp'],
@@ -148,7 +157,7 @@ def refresh_data_background():
                         }
                         
                         scans[scan_id] = scan_data
-                        projects[project_name]['scans'].append(scan_id)
+                        projects[project_key]['scans'].append(scan_id)
                         
                         # Update project statistics with latest scan only
                         vuln_counts = analytics.count_vulnerabilities_by_severity(parsed_data['vulnerabilities'])
@@ -157,21 +166,21 @@ def refresh_data_background():
                         scan_timestamp = parsed_data['metadata']['timestamp']
                         
                         # Only update if this is the latest scan for this project
-                        if (not projects[project_name]['last_scan'] or 
-                            scan_timestamp > projects[project_name]['last_scan']):
-                            projects[project_name]['critical_count'] = vuln_counts['critical']
-                            projects[project_name]['high_count'] = vuln_counts['high']
-                            projects[project_name]['medium_count'] = vuln_counts['medium']
-                            projects[project_name]['low_count'] = vuln_counts['low']
-                            projects[project_name]['total_vulnerabilities'] = vuln_counts['total']
+                        if (not projects[project_key]['last_scan'] or 
+                            scan_timestamp > projects[project_key]['last_scan']):
+                            projects[project_key]['critical_count'] = vuln_counts['critical']
+                            projects[project_key]['high_count'] = vuln_counts['high']
+                            projects[project_key]['medium_count'] = vuln_counts['medium']
+                            projects[project_key]['low_count'] = vuln_counts['low']
+                            projects[project_key]['total_vulnerabilities'] = vuln_counts['total']
                             # Update branch name from latest scan
                             branch_name = trivy_file.get('branch_name')
-                            projects[project_name]['branch_name'] = branch_name if branch_name else 'not provided'
+                            projects[project_key]['branch_name'] = branch_name if branch_name else 'not provided'
                         
                         # Update last scan timestamp
-                        if (not projects[project_name]['last_scan'] or 
-                            scan_timestamp > projects[project_name]['last_scan']):
-                            projects[project_name]['last_scan'] = scan_timestamp
+                        if (not projects[project_key]['last_scan'] or 
+                            scan_timestamp > projects[project_key]['last_scan']):
+                            projects[project_key]['last_scan'] = scan_timestamp
                         
                         # Store individual vulnerabilities
                         for vuln in parsed_data['vulnerabilities']:
@@ -181,6 +190,7 @@ def refresh_data_background():
                             vulnerabilities[vuln_id].append({
                                 'scan_id': scan_id,
                                 'project': project_name,
+                                'project_key': project_key,
                                 'details': vuln
                             })
                         
@@ -422,15 +432,16 @@ def projects():
         last_updated=format_timestamp(app_data['last_updated'])
     )
 
-@app.route('/project/<project_name>')
-def project_detail(project_name):
+@app.route('/project/<path:project_key>')
+def project_detail(project_key):
     """Individual project details with pagination"""
-    logger.info(f"📊 Rendering project detail for: {project_name}")
+    logger.info(f"📊 Rendering project detail for: {project_key}")
+    logger.info(f"Available projects: {list(app_data['projects'].keys())}")
     
-    if project_name not in app_data['projects']:
+    if project_key not in app_data['projects']:
         return "Project not found", 404
     
-    project = app_data['projects'][project_name]
+    project = app_data['projects'][project_key]
     
     # Get scan history for this project
     project_scans = [
@@ -630,15 +641,15 @@ def api_projects():
         'count': len(projects_list)
     })
 
-@app.route('/api/project/<project_name>/charts')
-def api_project_charts(project_name):
+@app.route('/api/project/<path:project_key>/charts')
+def api_project_charts(project_key):
     """API endpoint for project chart data"""
-    logger.info(f"🔌 API: Chart data requested for project: {project_name}")
+    logger.info(f"🔌 API: Chart data requested for project: {project_key}")
     
-    if project_name not in app_data['projects']:
+    if project_key not in app_data['projects']:
         return jsonify({'error': 'Project not found'}), 404
     
-    project = app_data['projects'][project_name]
+    project = app_data['projects'][project_key]
     
     # Get scan history for charts
     project_scans = [
@@ -1370,6 +1381,8 @@ def export_projects_pdf():
     
     for project in sorted_projects:
         project_name = project.get('name', 'Unknown')
+        folder_path = project.get('folder_path', '')
+        display_name = f"{project_name} ({folder_path})" if folder_path else project_name
         
         # Get all scans for this project
         project_scans = [app_data['scans'].get(scan_id) for scan_id in project.get('scans', [])]
@@ -1411,7 +1424,7 @@ def export_projects_pdf():
         
         # Add project main row (totals from latest scan of each branch)
         project_row = [
-            Paragraph(f"<b>{project_name[:40]}</b>" + (f" ({branch_count})" if branch_count > 1 else ""), project_name_style),
+            Paragraph(f"<b>{display_name[:50]}</b>" + (f" ({branch_count})" if branch_count > 1 else ""), project_name_style),
             Paragraph(f"<b>{proj_critical}</b>", cell_center_style),
             Paragraph(f"<b>{proj_high}</b>", cell_center_style),
             Paragraph(f"<b>{proj_medium}</b>", cell_center_style),
@@ -1638,6 +1651,8 @@ def export_projects_csv():
     
     for project in sorted_projects:
         project_name = project.get('name', 'Unknown')
+        folder_path = project.get('folder_path', '')
+        display_name = f"{project_name} ({folder_path})" if folder_path else project_name
         
         # Get all scans for this project
         project_scans = [app_data['scans'].get(scan_id) for scan_id in project.get('scans', [])]
@@ -1678,9 +1693,8 @@ def export_projects_csv():
                 latest_scan_time = scan_time
         
         # Add project main row (totals from latest scan of each branch)
-        project_display = f"{project_name}" + (f" ({branch_count} branches)" if branch_count > 1 else "")
         writer.writerow([
-            project_display,
+            display_name,
             'ALL BRANCHES (Total)',
             proj_critical,
             proj_high,

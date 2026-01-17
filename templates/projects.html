@@ -16,9 +16,14 @@
 <div class="row">
     {% for project in projects %}
     <div class="col-lg-4 col-md-6 mb-4">
-        <div class="card project-card h-100" onclick="location.href='/project/{{ project.name | urlencode }}'">
+        <div class="card project-card h-100" onclick="location.href='/project/{{ project.project_key | replace('|', '%7C') }}'">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h6 class="mb-0 font-weight-bold">{{ project.name }}</h6>
+                <div>
+                    <h6 class="mb-0 font-weight-bold">{{ project.name }}</h6>
+                    {% if project.folder_path %}
+                    <small class="text-muted" title="{{ project.folder_path }}">📁 {{ project.folder_path }}</small>
+                    {% endif %}
+                </div>
                 <span class="badge bg-{{ 'danger' if project.critical_count > 0 else 'warning' if project.high_count > 0 else 'success' }}">
                     {{ project.risk_score }}% Risk
                 </span>

@@ -13,6 +13,9 @@
             </ol>
         </nav>
         <h2><i class="fas fa-project-diagram me-2"></i>{{ project.name }}</h2>
+        {% if project.folder_path %}
+        <small class="text-muted d-block">📁 {{ project.folder_path }}</small>
+        {% endif %}
         <p class="text-muted">Security analysis and scan history</p>
     </div>
     <div>

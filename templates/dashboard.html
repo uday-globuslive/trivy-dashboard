@@ -360,7 +360,7 @@ function loadRecentScans() {
                         </div>
                         <div class="flex-grow-1 ms-3">
                             <div class="fw-bold">
-                                <a href="/project/${project.name}" class="text-decoration-none">
+                                <a href="/project/${project.project_key.replace(/\|/g, '%7C')}" class="text-decoration-none">
                                     ${project.name}
                                 </a>
                             </div>
