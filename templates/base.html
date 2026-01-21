@@ -287,6 +287,28 @@
             return 'Just now';
         }
 
+        // Poll loading status and reload page when data is ready
+        function pollLoadingStatus() {
+            fetch('/api/dashboard/summary')
+                .then(response => response.json())
+                .then(data => {
+                    // Update last updated timestamp
+                    if (data.last_updated) {
+                        document.getElementById('last-updated').textContent = 
+                            formatTimeAgo(new Date(data.last_updated));
+                    }
+                    
+                    // If loading was in progress and is now complete, reload page
+                    if (!data.is_loading && document.querySelector('.alert-info:has-text("Loading data from Nexus")')) {
+                        // Data is ready, reload to show it
+                        setTimeout(() => {
+                            location.reload();
+                        }, 1000);
+                    }
+                })
+                .catch(error => console.log('Status poll error:', error));
+        }
+
         // Initialize tooltips
         document.addEventListener('DOMContentLoaded', function() {
             const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
@@ -294,22 +316,32 @@
                 return new bootstrap.Tooltip(tooltipTriggerEl);
             });
 
+            // If loading indicator is visible, poll more frequently
+            const loadingAlert = document.querySelector('.alert-info');
+            if (loadingAlert && loadingAlert.textContent.includes('Loading data from Nexus')) {
+                // Poll every 2 seconds while loading
+                const loadingPoll = setInterval(() => {
+                    fetch('/api/dashboard/summary')
+                        .then(response => response.json())
+                        .then(data => {
+                            if (!data.is_loading) {
+                                // Data is ready, stop polling and reload
+                                clearInterval(loadingPoll);
+                                setTimeout(() => {
+                                    location.reload();
+                                }, 500);
+                            }
+                        })
+                        .catch(error => console.log('Loading poll error:', error));
+                }, 2000);
+            }
+
             // Update timestamps every minute
             updateTimestamps();
             setInterval(updateTimestamps, 60000);
 
             // Auto-refresh data every 5 minutes
-            setInterval(() => {
-                fetch('/api/dashboard/summary')
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.last_updated) {
-                            document.getElementById('last-updated').textContent = 
-                                formatTimeAgo(new Date(data.last_updated));
-                        }
-                    })
-                    .catch(error => console.log('Auto-refresh error:', error));
-            }, 300000); // 5 minutes
+            setInterval(pollLoadingStatus, 300000); // 5 minutes
         });
     </script>
 
