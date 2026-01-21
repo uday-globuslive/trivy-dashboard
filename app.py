@@ -473,6 +473,7 @@ def project_detail(project_key):
     return render_template('project.html',
         project=project,
         scans=paginated_scans,
+        all_scans=project_scans,
         trend_data=trend_data,
         debug_mode=debug_mode,
         page=page,

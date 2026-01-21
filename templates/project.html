@@ -811,8 +811,8 @@ function updateRiskAssessmentUI(data) {
 
 // Add CSS for risk score circle
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize allScans from template data
-    allScans = {{ scans | tojson }};
+    // Initialize allScans from template data - use all_scans for branch filters (all pages, not just current)
+    allScans = {{ all_scans | tojson if all_scans else scans | tojson }};
     
     // Debug logging to page - controlled by DEBUG_DASHBOARD env var
     const debugDiv = document.createElement('div');
