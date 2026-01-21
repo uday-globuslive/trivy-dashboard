@@ -102,8 +102,19 @@
                         </select>
                     </div>
                     <div class="col-12 col-md-3">
+                        <!-- Package Filter -->
+                        <select class="form-select form-select-sm" onchange="filterByPackage(this.value)">
+                            <option value="">All Packages</option>
+                            {% for package in unique_packages %}
+                            <option value="{{ package }}" {{ 'selected' if package_filter == package }}>{{ package }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="row g-2 mt-2">
+                    <div class="col-12 col-md-12">
                         <!-- Per Page Select -->
-                        <select class="form-select form-select-sm" onchange="changePerPage(this.value)">
+                        <select class="form-select form-select-sm" onchange="changePerPage(this.value)" style="max-width: 200px;">
                             <option value="25" {{ 'selected' if per_page == 25 }}>25 per page</option>
                             <option value="50" {{ 'selected' if per_page == 50 }}>50 per page</option>
                             <option value="100" {{ 'selected' if per_page == 100 }}>100 per page</option>
@@ -186,10 +197,10 @@
                     <nav aria-label="Vulnerability pagination">
                         <ul class="pagination pagination-sm mb-0">
                             <li class="page-item {{ 'disabled' if not has_prev }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=1, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter) if has_prev else '#' }}">First</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=1, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter, package=package_filter) if has_prev else '#' }}">First</a>
                             </li>
                             <li class="page-item {{ 'disabled' if not has_prev }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page-1, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter) if has_prev else '#' }}">Previous</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page-1, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter, package=package_filter) if has_prev else '#' }}">Previous</a>
                             </li>
                             
                             {% set start_page = [1, page - 2]|max %}
@@ -201,7 +212,7 @@
                             
                             {% for p in range(start_page, end_page + 1) %}
                                 <li class="page-item {{ 'active' if p == page }}">
-                                    <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=p, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter) }}">{{ p }}</a>
+                                    <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=p, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter, package=package_filter) }}">{{ p }}</a>
                                 </li>
                             {% endfor %}
                             
@@ -210,10 +221,10 @@
                             {% endif %}
                             
                             <li class="page-item {{ 'disabled' if not has_next }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page+1, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter) if has_next else '#' }}">Next</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=page+1, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter, package=package_filter) if has_next else '#' }}">Next</a>
                             </li>
                             <li class="page-item {{ 'disabled' if not has_next }}">
-                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=total_pages, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter) if has_next else '#' }}">Last</a>
+                                <a class="page-link" href="{{ url_for('scan_detail', scan_id=scan.id, page=total_pages, per_page=per_page, severity=severity_filter, cve_search=cve_search, component=component_filter, package=package_filter) if has_next else '#' }}">Last</a>
                             </li>
                         </ul>
                     </nav>
@@ -314,6 +325,17 @@ function filterByComponent(component) {
         url.searchParams.set('component', component);
     } else {
         url.searchParams.delete('component');
+    }
+    url.searchParams.set('page', '1'); // Reset to first page
+    window.location.href = url.toString();
+}
+
+function filterByPackage(package_name) {
+    const url = new URL(window.location);
+    if (package_name) {
+        url.searchParams.set('package', package_name);
+    } else {
+        url.searchParams.delete('package');
     }
     url.searchParams.set('page', '1'); // Reset to first page
     window.location.href = url.toString();

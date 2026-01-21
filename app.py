@@ -497,6 +497,7 @@ def scan_detail(scan_id):
     severity_filter = request.args.get('severity', '').upper()
     cve_search = request.args.get('cve_search', '').strip().upper()
     component_filter = request.args.get('component', '').strip()
+    package_filter = request.args.get('package', '').strip()
     
     # Filter vulnerabilities by severity if specified
     vulnerabilities = scan['vulnerabilities']
@@ -510,6 +511,10 @@ def scan_detail(scan_id):
     # Filter vulnerabilities by component if specified
     if component_filter:
         vulnerabilities = [v for v in vulnerabilities if component_filter.lower() in v.get('properties', {}).get('target', '').lower()]
+    
+    # Filter vulnerabilities by package if specified
+    if package_filter:
+        vulnerabilities = [v for v in vulnerabilities if package_filter.lower() in v.get('properties', {}).get('package_name', '').lower()]
     
     # Calculate pagination
     total_vulns = len(vulnerabilities)
@@ -533,11 +538,16 @@ def scan_detail(scan_id):
     
     # Extract unique components from vulnerabilities for filter dropdown
     unique_components = set()
+    unique_packages = set()
     for vuln in scan['vulnerabilities']:
         target = vuln.get('properties', {}).get('target', '')
         if target:
             unique_components.add(target)
+        package_name = vuln.get('properties', {}).get('package_name', '')
+        if package_name:
+            unique_packages.add(package_name)
     unique_components = sorted(list(unique_components))
+    unique_packages = sorted(list(unique_packages))
     
     # Add calculated fields to scan data for template
     scan_with_calculated = scan.copy()
@@ -558,7 +568,9 @@ def scan_detail(scan_id):
         severity_filter=severity_filter.lower() if severity_filter else '',
         cve_search=cve_search,
         component_filter=component_filter,
-        unique_components=unique_components
+        package_filter=package_filter,
+        unique_components=unique_components,
+        unique_packages=unique_packages
     )
 
 @app.route('/scan/<scan_id>/vulnerability/<vuln_id>')
