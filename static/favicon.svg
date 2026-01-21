@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Shield background - Windows Defender blue -->
+  <path d="M32 8 L52 18 L52 36 Q52 54 32 62 Q12 54 12 36 L12 18 Z" fill="#0078D4" stroke="#005A9E" stroke-width="1"/>
+  
+  <!-- Checkmark - White, bold -->
+  <path d="M 24 34 L 32 44 L 48 24" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
