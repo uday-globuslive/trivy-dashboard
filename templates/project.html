@@ -237,10 +237,10 @@
                         <td>{{ scan.vulnerabilities | length }}</td>
                         <td>{{ scan.components | length }}</td>
                         <td>
-                            <a href="{{ url_for('scan_detail', scan_id=scan.id) }}" class="btn btn-sm btn-outline-primary me-1">
+                            <a href="{{ url_for('scan_detail', scan_id=scan.id | urlencode) }}" class="btn btn-sm btn-outline-primary me-1">
                                 <i class="fas fa-eye"></i> View Details
                             </a>
-                            <a href="/scan/{{ scan.id }}/sbom/details" class="btn btn-sm btn-info">
+                            <a href="/scan/{{ scan.id | urlencode }}/sbom/details" class="btn btn-sm btn-info">
                                 <i class="fas fa-list-alt"></i> SBOM Details
                             </a>
                         </td>

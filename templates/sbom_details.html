@@ -20,7 +20,7 @@
                     </p>
                 </div>
                 <div>
-                    <a href="/scan/{{ scan.id }}" class="btn btn-secondary">
+                    <a href="/scan/{{ scan.id | urlencode }}" class="btn btn-secondary">
                         <i class="fas fa-arrow-left"></i> Back to Scan
                     </a>
                     <div class="btn-group" role="group">
@@ -28,10 +28,10 @@
                             <i class="fas fa-download"></i> Export
                         </button>
                         <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" href="/scan/{{ scan.id }}/sbom/export" target="_blank">
+                            <li><a class="dropdown-item" href="/scan/{{ scan.id | urlencode }}/sbom/export" target="_blank">
                                 <i class="fas fa-file-alt"></i> SPDX Text Format
                             </a></li>
-                            <li><a class="dropdown-item" href="/scan/{{ scan.id }}/sbom/export/json" target="_blank">
+                            <li><a class="dropdown-item" href="/scan/{{ scan.id | urlencode }}/sbom/export/json" target="_blank">
                                 <i class="fas fa-file-code"></i> JSON Format
                             </a></li>
                         </ul>
