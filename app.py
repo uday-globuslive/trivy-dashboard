@@ -9,6 +9,7 @@ import os
 import json
 import logging
 from datetime import datetime, timedelta
+from urllib.parse import unquote
 from flask import Flask, render_template, request, jsonify, send_file, Response
 from flask_cors import CORS
 import threading
@@ -97,6 +98,9 @@ def refresh_data_background():
                 projects = {}
                 scans = {}
                 vulnerabilities = {}
+                processed_count = 0
+                skipped_count = 0
+                error_count = 0
                 
                 for trivy_file in trivy_files:
                     try:
@@ -105,7 +109,8 @@ def refresh_data_background():
                         
                         # Check if it's a Trivy report (skip if not)
                         if not trivy_parser.is_trivy_report(trivy_content):
-                            logger.warning(f"⚠️ Skipping non-Trivy report file: {trivy_file['path']}")
+                            logger.debug(f"⏭️ Skipping non-Trivy report file: {trivy_file['path']}")
+                            skipped_count += 1
                             continue
                             
                         parsed_data = trivy_parser.parse_trivy_report(trivy_content)
@@ -194,8 +199,13 @@ def refresh_data_background():
                                 'details': vuln
                             })
                         
+                        processed_count += 1
+                        
                     except Exception as e:
                         logger.error(f"❌ Error processing Trivy report file {trivy_file['path']}: {str(e)}")
+                        error_count += 1
+                        import traceback
+                        logger.error(f"Traceback: {traceback.format_exc()}")
                         continue
                 
                 # Calculate risk scores for projects
@@ -208,13 +218,15 @@ def refresh_data_background():
                     )
                 
                 # Update global data
+                logger.info(f"💾 Storing {len(projects)} projects in app_data")
+                logger.info(f"💾 Project keys to store: {list(projects.keys())[:5]}...")
                 app_data['projects'] = projects
                 app_data['scans'] = scans
                 app_data['vulnerabilities'] = vulnerabilities
                 app_data['last_updated'] = datetime.now()
                 app_data['is_loading'] = False
                 
-                logger.info(f"✅ Data refresh complete. Projects: {len(projects)}, Scans: {len(scans)}")
+                logger.info(f"✅ Data refresh complete. Projects: {len(projects)}, Scans: {len(scans)}, Processed: {processed_count}, Skipped: {skipped_count}, Errors: {error_count}")
                 
         except Exception as e:
             logger.error(f"❌ Error in background data refresh: {str(e)}")
@@ -419,6 +431,9 @@ def dashboard():
 def projects():
     """Projects overview page"""
     logger.info("📁 Rendering projects page")
+    logger.info(f"📊 Current projects in app_data: {len(app_data['projects'])} projects")
+    if len(app_data['projects']) > 0:
+        logger.info(f"📋 Project keys: {list(app_data['projects'].keys())[:5]}...")
     
     # Sort projects by risk score (highest first)
     sorted_projects = sorted(
@@ -427,6 +442,7 @@ def projects():
         reverse=True
     )
     
+    logger.info(f"✅ Passing {len(sorted_projects)} projects to template")
     return render_template('projects.html',
         projects=sorted_projects,
         last_updated=format_timestamp(app_data['last_updated'])
@@ -482,12 +498,16 @@ def project_detail(project_key):
         total_pages=total_pages
     )
 
-@app.route('/scan/<scan_id>')
+@app.route('/scan/<path:scan_id>')
 def scan_detail(scan_id):
     """Individual scan details with pagination"""
+    # Decode the URL-encoded scan_id
+    scan_id = unquote(scan_id)
     logger.info(f"🔍 Rendering scan detail for: {scan_id}")
     
     if scan_id not in app_data['scans']:
+        logger.warning(f"❌ Scan not found: {scan_id}")
+        logger.debug(f"Available scans: {list(app_data['scans'].keys())[:5]}...")  # Show first 5 for debugging
         return "Scan not found", 404
     
     scan = app_data['scans'][scan_id]
@@ -574,9 +594,11 @@ def scan_detail(scan_id):
         unique_packages=unique_packages
     )
 
-@app.route('/scan/<scan_id>/vulnerability/<vuln_id>')
+@app.route('/scan/<path:scan_id>/vulnerability/<vuln_id>')
 def vulnerability_detail(scan_id, vuln_id):
     """Individual vulnerability details with SBOM information from Trivy report"""
+    # Decode the URL-encoded scan_id
+    scan_id = unquote(scan_id)
     logger.info(f"🔍 Rendering vulnerability detail for: {vuln_id} in scan: {scan_id}")
     
     if scan_id not in app_data['scans']:
@@ -837,9 +859,11 @@ def sbom_analysis():
     
     return jsonify(analysis)
 
-@app.route('/scan/<scan_id>/sbom/details')
+@app.route('/scan/<path:scan_id>/sbom/details')
 def sbom_details(scan_id):
     """SBOM details view with comprehensive package information"""
+    # Decode the URL-encoded scan_id
+    scan_id = unquote(scan_id)
     logger.info(f"📋 Rendering SBOM details for scan: {scan_id}")
     
     if scan_id not in app_data['scans']:
@@ -898,9 +922,11 @@ def sbom_details(scan_id):
         return render_template('error.html',
             error_message=f"Error generating SBOM details: {str(e)}"), 500
 
-@app.route('/scan/<scan_id>/sbom/export')
+@app.route('/scan/<path:scan_id>/sbom/export')
 def export_sbom_spdx_json(scan_id):
     """Export SBOM as SPDX JSON format"""
+    # Decode the URL-encoded scan_id
+    scan_id = unquote(scan_id)
     logger.info(f"📤 Export SBOM as SPDX JSON for scan: {scan_id}")
     
     if scan_id not in app_data['scans']:
@@ -953,9 +979,11 @@ def export_sbom_spdx_json(scan_id):
         logger.error(f"Error exporting SBOM: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/scan/<scan_id>/sbom/export/json')
+@app.route('/scan/<path:scan_id>/sbom/export/json')
 def export_sbom_json(scan_id):
     """Export SBOM as regular JSON format"""
+    # Decode the URL-encoded scan_id
+    scan_id = unquote(scan_id)
     logger.info(f"📤 Export SBOM as JSON for scan: {scan_id}")
     
     if scan_id not in app_data['scans']:
@@ -997,9 +1025,11 @@ def component_analysis():
         last_updated=format_timestamp(app_data['last_updated']) if app_data['last_updated'] else None
     )
 
-@app.route('/scan/<scan_id>/export/vulnerabilities/<format>')
+@app.route('/scan/<path:scan_id>/export/vulnerabilities/<format>')
 def export_scan_vulnerabilities(scan_id, format):
     """Export scan vulnerabilities as PDF or CSV"""
+    # Decode the URL-encoded scan_id
+    scan_id = unquote(scan_id)
     logger.info(f"📤 Exporting scan vulnerabilities for: {scan_id} as {format}")
     
     if scan_id not in app_data['scans']:

@@ -93,7 +93,7 @@ class NexusClient:
                 
                 for asset in items:
                     try:
-                        # Parse asset path: com/mccamish/AGP_Stellar_SSO.sbom/1.0.0-20250521034211/AGP_Stellar_SSO.sbom-1.0.0-20250521034211.json
+                        # Parse asset path: com/mccamish/AGP_Stellar_SSO.sbom/1.0.0-20250521034211/AGP_Stellar_SSO.sbom-1.0.0-20250521034211-trivy-report.json
                         asset_path = asset.get('path', '')
                         download_url = asset.get('downloadUrl', '')
                         
@@ -335,6 +335,7 @@ class NexusClient:
         except Exception as e:
             logger.error(f"❌ Error searching Trivy report files for project {project_name}: {str(e)}")
             return []
+    
     
     def _extract_build_number(self, version_string):
         """Extract build number from version string (handles patterns like 1.0.0-20250521034211)"""
