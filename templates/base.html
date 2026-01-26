@@ -312,6 +312,9 @@
             return 'Just now';
         }
 
+        // Track if we're currently loading to avoid multiple reloads
+        let wasLoading = false;
+        
         // Poll loading status and reload page when data is ready
         function pollLoadingStatus() {
             fetch('/api/dashboard/summary')
@@ -324,11 +327,18 @@
                     }
                     
                     // If loading was in progress and is now complete, reload page
-                    if (!data.is_loading && document.querySelector('.alert-info:has-text("Loading data from Nexus")')) {
+                    if (wasLoading && !data.is_loading) {
+                        console.log('Data refresh completed, reloading page...');
+                        wasLoading = false;
                         // Data is ready, reload to show it
                         setTimeout(() => {
                             location.reload();
-                        }, 1000);
+                        }, 500);
+                    }
+                    
+                    // Update loading state
+                    if (data.is_loading) {
+                        wasLoading = true;
                     }
                 })
                 .catch(error => console.log('Status poll error:', error));
@@ -341,9 +351,13 @@
                 return new bootstrap.Tooltip(tooltipTriggerEl);
             });
 
-            // If loading indicator is visible, poll more frequently
+            // Check if loading indicator is visible on page load
             const loadingAlert = document.querySelector('.alert-info');
-            if (loadingAlert && loadingAlert.textContent.includes('Loading data from Nexus')) {
+            if (loadingAlert) {
+                // Set initial loading state
+                wasLoading = true;
+                console.log('Loading indicator detected, starting polling...');
+                
                 // Poll every 2 seconds while loading
                 const loadingPoll = setInterval(() => {
                     fetch('/api/dashboard/summary')
@@ -351,6 +365,7 @@
                         .then(data => {
                             if (!data.is_loading) {
                                 // Data is ready, stop polling and reload
+                                console.log('Data refresh completed, reloading page...');
                                 clearInterval(loadingPoll);
                                 setTimeout(() => {
                                     location.reload();
