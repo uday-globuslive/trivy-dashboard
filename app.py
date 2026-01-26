@@ -73,43 +73,135 @@ app_data = {
     'vulnerabilities': {},
     'last_updated': None,
     'is_loading': False,
-    'force_refresh': False  # Flag to force immediate refresh
+    'force_refresh': False,  # Flag to force immediate refresh
+    'file_metadata': {},  # Track file paths and their last modified times for incremental updates
+    'refresh_stats': {  # Statistics about last refresh
+        'total_files': 0,
+        'new_files': 0,
+        'updated_files': 0,
+        'unchanged_files': 0,
+        'deleted_files': 0,
+        'errors': 0
+    },
+    'refresh_progress': {  # Real-time progress during refresh
+        'current_file': None,
+        'processed_count': 0,
+        'total_count': 0,
+        'percentage': 0,
+        'phase': 'idle'  # idle, fetching, processing, cleaning, complete
+    }
 }
 
 # Threading event for immediate refresh trigger
 refresh_event = threading.Event()
 
 def refresh_data_background():
-    """Background task to refresh data from Nexus"""
+    """Background task to refresh data from Nexus with incremental updates"""
     while True:
         try:
             # Check if we should refresh: either on regular interval or forced refresh
             should_refresh = not app_data['is_loading']
             
             if should_refresh or app_data['force_refresh']:
+                is_force_refresh = app_data['force_refresh']
                 app_data['force_refresh'] = False  # Reset force refresh flag
-                logger.info("🔄 Starting background data refresh...")
+                logger.info(f"🔄 Starting {'FORCE' if is_force_refresh else 'scheduled'} data refresh...")
                 app_data['is_loading'] = True
+                
+                # Reset refresh stats
+                app_data['refresh_stats'] = {
+                    'total_files': 0,
+                    'new_files': 0,
+                    'updated_files': 0,
+                    'unchanged_files': 0,
+                    'deleted_files': 0,
+                    'errors': 0
+                }
+                
+                # Reset progress tracking
+                app_data['refresh_progress'] = {
+                    'current_file': None,
+                    'processed_count': 0,
+                    'total_count': 0,
+                    'percentage': 0,
+                    'phase': 'fetching'
+                }
                 
                 # Fetch latest Trivy report files from Nexus
                 trivy_files = nexus_client.list_trivy_files()
                 logger.info(f"📦 Found {len(trivy_files)} Trivy report files in Nexus")
                 
-                projects = {}
-                scans = {}
-                vulnerabilities = {}
+                # Debug: Log first few file paths to verify what's being fetched
+                if trivy_files:
+                    logger.info(f"📋 Sample files from Nexus: {[f['path'] for f in trivy_files[:3]]}")
+                
+                app_data['refresh_stats']['total_files'] = len(trivy_files)
+                app_data['refresh_progress']['total_count'] = len(trivy_files)
+                app_data['refresh_progress']['phase'] = 'processing'
+                
+                # Use existing data or create new dictionaries for force refresh
+                if is_force_refresh:
+                    logger.info("🔃 Force refresh - reloading ALL data from scratch")
+                    # Start completely fresh - load only what's currently in JFrog
+                    projects = {}
+                    scans = {}
+                    vulnerabilities = {}
+                    file_metadata = {}
+                    # Clear app_data immediately so UI shows empty state during reload
+                    app_data['projects'] = {}
+                    app_data['scans'] = {}
+                    app_data['vulnerabilities'] = {}
+                    app_data['file_metadata'] = {}
+                    logger.info("🗑️ Cleared all existing data from app_data")
+                else:
+                    # Incremental update - start with existing data
+                    logger.info("⚡ Incremental refresh - only updating changed files")
+                    projects = app_data['projects'].copy()
+                    scans = app_data['scans'].copy()
+                    vulnerabilities = app_data['vulnerabilities'].copy()
+                    file_metadata = app_data['file_metadata'].copy()
+                    
                 processed_count = 0
                 skipped_count = 0
                 error_count = 0
                 
+                # Track which files we've seen in this refresh
+                current_file_paths = set()
+                
                 for trivy_file in trivy_files:
                     try:
+                        file_path = trivy_file['path']
+                        current_file_paths.add(file_path)
+                        
+                        # Update progress
+                        app_data['refresh_progress']['current_file'] = file_path
+                        app_data['refresh_progress']['processed_count'] = processed_count + skipped_count
+                        if len(trivy_files) > 0:
+                            app_data['refresh_progress']['percentage'] = int((processed_count + skipped_count) * 100 / len(trivy_files))
+                        
+                        # Check if file has changed (compare last modified time)
+                        file_last_modified = trivy_file.get('lastModified', trivy_file.get('last_modified', ''))
+                        
+                        # Skip unchanged files during incremental refresh ONLY
+                        if not is_force_refresh and file_path in file_metadata:
+                            if file_metadata[file_path].get('last_modified') == file_last_modified:
+                                logger.debug(f"⏭️ Skipping unchanged file: {file_path}")
+                                app_data['refresh_stats']['unchanged_files'] += 1
+                                skipped_count += 1
+                                continue
+                            else:
+                                logger.info(f"📝 File changed: {file_path}")
+                        elif is_force_refresh:
+                            logger.debug(f"📄 Force refresh - processing: {file_path}")
+                        else:
+                            logger.info(f"✨ New file: {file_path}")
+                        
                         # Download and parse Trivy report
-                        trivy_content = nexus_client.download_trivy_report(trivy_file['path'])
+                        trivy_content = nexus_client.download_trivy_report(file_path)
                         
                         # Check if it's a Trivy report (skip if not)
                         if not trivy_parser.is_trivy_report(trivy_content):
-                            logger.debug(f"⏭️ Skipping non-Trivy report file: {trivy_file['path']}")
+                            logger.debug(f"⏭️ Skipping non-Trivy report file: {file_path}")
                             skipped_count += 1
                             continue
                             
@@ -162,7 +254,10 @@ def refresh_data_background():
                         }
                         
                         scans[scan_id] = scan_data
-                        projects[project_key]['scans'].append(scan_id)
+                        
+                        # Add scan to project if not already there
+                        if scan_id not in projects[project_key]['scans']:
+                            projects[project_key]['scans'].append(scan_id)
                         
                         # Update project statistics with latest scan only
                         vuln_counts = analytics.count_vulnerabilities_by_severity(parsed_data['vulnerabilities'])
@@ -199,14 +294,140 @@ def refresh_data_background():
                                 'details': vuln
                             })
                         
+                        # Update file metadata
+                        is_new_file = file_path not in file_metadata
+                        file_metadata[file_path] = {
+                            'last_modified': file_last_modified,
+                            'last_processed': datetime.now().isoformat(),
+                            'project_key': project_key,
+                            'scan_id': scan_id
+                        }
+                        
+                        if is_new_file:
+                            app_data['refresh_stats']['new_files'] += 1
+                            logger.debug(f"✨ New file processed: {file_path}")
+                        else:
+                            app_data['refresh_stats']['updated_files'] += 1
+                            logger.debug(f"🔄 Updated file processed: {file_path}")
+                        
                         processed_count += 1
                         
                     except Exception as e:
                         logger.error(f"❌ Error processing Trivy report file {trivy_file['path']}: {str(e)}")
                         error_count += 1
+                        app_data['refresh_stats']['errors'] += 1
                         import traceback
                         logger.error(f"Traceback: {traceback.format_exc()}")
                         continue
+                
+                # Clean up deleted files (for incremental refresh only, force refresh already skipped them)
+                # For incremental, we need to remove from existing dictionaries
+                if not is_force_refresh:
+                    app_data['refresh_progress']['phase'] = 'cleaning'
+                    # Check against the ORIGINAL metadata from app_data, not the local copy
+                    metadata_to_check = app_data['file_metadata'].copy()
+                    
+                    logger.info(f"🔍 Incremental deletion check: metadata has {len(metadata_to_check)} files, current has {len(current_file_paths)} files")
+                    
+                    deleted_files = set(metadata_to_check.keys()) - current_file_paths
+                    if deleted_files:
+                        logger.info(f"🔍 Found {len(deleted_files)} deleted files in incremental refresh:")
+                        for df in list(deleted_files)[:5]:  # Log first 5
+                            logger.info(f"  - {df}")
+                    
+                    for deleted_file in deleted_files:
+                        metadata = metadata_to_check[deleted_file]
+                        scan_id = metadata.get('scan_id')
+                        project_key = metadata.get('project_key')
+                        
+                        logger.info(f"🗑️ Removing from incremental: file={deleted_file}, scan={scan_id}")
+                        
+                        # Remove scan
+                        if scan_id and scan_id in scans:
+                            # Get vulnerabilities from this scan before deleting
+                            deleted_scan = scans[scan_id]
+                            del scans[scan_id]
+                            logger.info(f"🗑️ Removed deleted scan from scans dict: {scan_id}")
+                            
+                            # Clean up vulnerabilities dictionary - remove references to this scan
+                            for vuln in deleted_scan.get('vulnerabilities', []):
+                                vuln_id = vuln['id']
+                                if vuln_id in vulnerabilities:
+                                    # Remove this scan's entry from the vulnerability list
+                                    vulnerabilities[vuln_id] = [
+                                        v for v in vulnerabilities[vuln_id] 
+                                        if v['scan_id'] != scan_id
+                                    ]
+                                    # If no more scans reference this vulnerability, remove it entirely
+                                    if not vulnerabilities[vuln_id]:
+                                        del vulnerabilities[vuln_id]
+                        
+                        # Remove from project scans list
+                        if project_key and project_key in projects:
+                            if scan_id in projects[project_key].get('scans', []):
+                                projects[project_key]['scans'].remove(scan_id)
+                                logger.debug(f"📝 Removed scan {scan_id} from project {project_key}")
+                        
+                        # Remove from metadata
+                        if deleted_file in file_metadata:
+                            del file_metadata[deleted_file]
+                        
+                        app_data['refresh_stats']['deleted_files'] += 1
+                    
+                    if deleted_files:
+                        logger.info(f"🗑️ Cleaned up {len(deleted_files)} deleted files in incremental refresh")
+                    
+                    # Recalculate project statistics after deletions
+                    projects_to_recalculate = set()
+                    for deleted_file in deleted_files:
+                        metadata = metadata_to_check.get(deleted_file)
+                        if metadata:
+                            projects_to_recalculate.add(metadata.get('project_key'))
+                    
+                    # For each affected project, recalculate statistics from remaining scans
+                    for project_key in projects_to_recalculate:
+                        if project_key not in projects:
+                            continue
+                            
+                        project = projects[project_key]
+                        remaining_scans = project['scans']
+                        
+                        if not remaining_scans:
+                            # No scans left - remove the project entirely
+                            logger.info(f"🗑️ Removing empty project: {project_key}")
+                            del projects[project_key]
+                            continue
+                        
+                        # Reset counters
+                        project['critical_count'] = 0
+                        project['high_count'] = 0
+                        project['medium_count'] = 0
+                        project['low_count'] = 0
+                        project['total_vulnerabilities'] = 0
+                        project['last_scan'] = None
+                        
+                        # Recalculate from remaining scans
+                        for scan_id in remaining_scans:
+                            if scan_id not in scans:
+                                continue
+                            scan = scans[scan_id]
+                            scan_timestamp = scan['timestamp']
+                            
+                            # Find the latest scan and use its statistics
+                            if not project['last_scan'] or scan_timestamp > project['last_scan']:
+                                vuln_counts = analytics.count_vulnerabilities_by_severity(scan['vulnerabilities'])
+                                project['critical_count'] = vuln_counts['critical']
+                                project['high_count'] = vuln_counts['high']
+                                project['medium_count'] = vuln_counts['medium']
+                                project['low_count'] = vuln_counts['low']
+                                project['total_vulnerabilities'] = vuln_counts['total']
+                                project['last_scan'] = scan_timestamp
+                                project['branch_name'] = scan.get('branch_name', 'not provided')
+                        
+                        logger.debug(f"📊 Recalculated statistics for project {project_key}: {project['total_vulnerabilities']} vulnerabilities")
+                
+                # For force refresh, no need to track deletions - we started fresh
+                # For incremental refresh, we already handled deletions above
                 
                 # Calculate risk scores for projects
                 for project in projects.values():
@@ -219,14 +440,21 @@ def refresh_data_background():
                 
                 # Update global data
                 logger.info(f"💾 Storing {len(projects)} projects in app_data")
-                logger.info(f"💾 Project keys to store: {list(projects.keys())[:5]}...")
                 app_data['projects'] = projects
                 app_data['scans'] = scans
                 app_data['vulnerabilities'] = vulnerabilities
+                app_data['file_metadata'] = file_metadata
                 app_data['last_updated'] = datetime.now()
                 app_data['is_loading'] = False
                 
-                logger.info(f"✅ Data refresh complete. Projects: {len(projects)}, Scans: {len(scans)}, Processed: {processed_count}, Skipped: {skipped_count}, Errors: {error_count}")
+                # Mark progress as complete
+                app_data['refresh_progress']['phase'] = 'complete'
+                app_data['refresh_progress']['percentage'] = 100
+                app_data['refresh_progress']['current_file'] = None
+                
+                stats = app_data['refresh_stats']
+                logger.info(f"✅ Data refresh complete. Projects: {len(projects)}, Scans: {len(scans)}")
+                logger.info(f"📊 Stats - Total: {stats['total_files']}, New: {stats['new_files']}, Updated: {stats['updated_files']}, Unchanged: {stats['unchanged_files']}, Deleted: {stats['deleted_files']}, Errors: {stats['errors']}")
                 
         except Exception as e:
             logger.error(f"❌ Error in background data refresh: {str(e)}")
@@ -240,63 +468,71 @@ def refresh_data_background():
 refresh_thread = threading.Thread(target=refresh_data_background, daemon=True)
 refresh_thread.start()
 
+@app.context_processor
+def inject_artifactory_info():
+    """Inject artifactory configuration into all templates"""
+    artifactory_display_name = 'JFrog Artifactory' if Config.ARTIFACTORY_TYPE == 'jfrog' else 'Nexus Repository'
+    return {
+        'artifactory_type': Config.ARTIFACTORY_TYPE,
+        'artifactory_name': artifactory_display_name
+    }
+
 @app.route('/debug/nexus')
 def debug_nexus():
     """Debug endpoint to inspect Artifactory connection and Trivy report discovery"""
     logger.info("🔧 Debug: Artifactory connection and Trivy report discovery")
     
-    # Build config based on artifactory type
-    if Config.ARTIFACTORY_TYPE == 'jfrog':
-        artifactory_config = {
-            'type': 'jfrog',
-            'url': Config.JFROG_URL,
-            'repository': Config.JFROG_REPOSITORY,
-            'username': Config.JFROG_USERNAME,
-            'group_id': Config.JFROG_GROUP_ID,
-            'artifact_suffix': Config.JFROG_ARTIFACT_SUFFIX,
-            'version_prefix': Config.JFROG_VERSION_PREFIX,
-            'asset_extension': Config.JFROG_ASSET_EXTENSION
-        }
-        api_tests = {
-            'ping': f"{Config.JFROG_URL}/artifactory/api/system/ping",
-            'repositories': f"{Config.JFROG_URL}/artifactory/api/repositories",
-            'repository_info': f"{Config.JFROG_URL}/artifactory/api/repositories/{Config.JFROG_REPOSITORY}",
-            'browse_repo': f"{Config.JFROG_URL}/artifactory/{Config.JFROG_REPOSITORY}/"
-        }
-    else:  # nexus
-        artifactory_config = {
-            'type': 'nexus',
-            'url': Config.NEXUS_URL,
-            'repository': Config.NEXUS_REPOSITORY,
-            'username': Config.NEXUS_USERNAME,
-            'group_id': Config.NEXUS_GROUP_ID,
-            'artifact_suffix': Config.NEXUS_ARTIFACT_SUFFIX,
-            'version_prefix': Config.NEXUS_VERSION_PREFIX,
-            'asset_extension': Config.NEXUS_ASSET_EXTENSION
-        }
-        api_tests = {
-            'status': f"{Config.NEXUS_URL}/service/rest/v1/status",
-            'repositories': f"{Config.NEXUS_URL}/service/rest/v1/repositories",
-            'search_assets': f"{Config.NEXUS_URL}/service/rest/v1/search/assets",
-            'repository_info': f"{Config.NEXUS_URL}/service/rest/v1/repositories/{Config.NEXUS_REPOSITORY}",
-            'browse_repo': f"{Config.NEXUS_URL}/repository/{Config.NEXUS_REPOSITORY}/com/mccamish/"
-        }
-    
-    debug_info = {
-        'artifactory_config': artifactory_config,
-        'connection_test': False,
-        'trivy_files': [],
-        'error_message': None,
-        'api_endpoints': {},
-        'test_results': {},
-        'trivy_analysis': {}
-    }
-    
+    debug_info = {}
     try:
+        # Build config based on artifactory type
+        if Config.ARTIFACTORY_TYPE == 'jfrog':
+            artifactory_config = {
+                'type': 'jfrog',
+                'url': Config.JFROG_URL,
+                'repository': Config.JFROG_REPOSITORY,
+                'username': Config.JFROG_USERNAME,
+                'group_id': Config.JFROG_GROUP_ID,
+                'artifact_suffix': Config.JFROG_ARTIFACT_SUFFIX,
+                'version_prefix': Config.JFROG_VERSION_PREFIX,
+                'asset_extension': Config.JFROG_ASSET_EXTENSION
+            }
+            api_tests = {
+                'ping': f"{Config.JFROG_URL}/artifactory/api/system/ping",
+                'repositories': f"{Config.JFROG_URL}/artifactory/api/repositories",
+                'repository_info': f"{Config.JFROG_URL}/artifactory/api/repositories/{Config.JFROG_REPOSITORY}",
+                'browse_repo': f"{Config.JFROG_URL}/artifactory/{Config.JFROG_REPOSITORY}/"
+            }
+        else:  # nexus
+            artifactory_config = {
+                'type': 'nexus',
+                'url': Config.NEXUS_URL,
+                'repository': Config.NEXUS_REPOSITORY,
+                'username': Config.NEXUS_USERNAME,
+                'group_id': Config.NEXUS_GROUP_ID,
+                'artifact_suffix': Config.NEXUS_ARTIFACT_SUFFIX,
+                'version_prefix': Config.NEXUS_VERSION_PREFIX,
+                'asset_extension': Config.NEXUS_ASSET_EXTENSION
+            }
+            api_tests = {
+                'status': f"{Config.NEXUS_URL}/service/rest/v1/status",
+                'repositories': f"{Config.NEXUS_URL}/service/rest/v1/repositories",
+                'search_assets': f"{Config.NEXUS_URL}/service/rest/v1/search/assets",
+                'repository_info': f"{Config.NEXUS_URL}/service/rest/v1/repositories/{Config.NEXUS_REPOSITORY}",
+                'browse_repo': f"{Config.NEXUS_URL}/repository/{Config.NEXUS_REPOSITORY}/com/mccamish/"
+            }
+        
+        debug_info = {
+            'artifactory_config': artifactory_config,
+            'connection_test': False,
+            'trivy_files': [],
+            'error_message': None,
+            'api_endpoints': api_tests,
+            'test_results': {},
+            'trivy_analysis': {}
+        }
+        
         # Test basic connection
         debug_info['connection_test'] = nexus_client.test_connection()
-        
-        debug_info['api_endpoints'] = api_tests
         
         # Test each endpoint
         for name, url in api_tests.items():
@@ -459,43 +695,80 @@ def project_detail(project_key):
     
     project = app_data['projects'][project_key]
     
-    # Get scan history for this project
-    project_scans = [
+    # Get scan history for this project (ALL scans, unfiltered)
+    all_project_scans = [
         app_data['scans'][scan_id] for scan_id in project['scans']
     ]
-    project_scans.sort(key=lambda x: x['timestamp'] if x['timestamp'] else datetime.min, reverse=True)
+    all_project_scans.sort(key=lambda x: x['timestamp'] if x['timestamp'] else datetime.min, reverse=True)
     
-    # Get pagination parameters
+    # Get pagination and filter parameters
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', Config.DEFAULT_PAGE_SIZE, type=int)
+    branch_filter = request.args.get('branch', 'all', type=str)
     
-    # Calculate pagination
-    total_scans = len(project_scans)
+    # Apply branch filter for display if specified
+    filtered_scans = all_project_scans
+    if branch_filter and branch_filter != 'all':
+        filtered_scans = [
+            scan for scan in all_project_scans 
+            if scan.get('branch_name', 'not provided') == branch_filter
+        ]
+        logger.info(f"🔍 Filtered to branch '{branch_filter}': {len(filtered_scans)} scans")
+    
+    # Calculate pagination on filtered scans
+    total_scans = len(filtered_scans)
     total_pages = (total_scans + per_page - 1) // per_page
     start_idx = (page - 1) * per_page
     end_idx = start_idx + per_page
     
     # Get scans for current page
-    paginated_scans = project_scans[start_idx:end_idx]
+    paginated_scans = filtered_scans[start_idx:end_idx]
     
     logger.info(f"📊 Project scans: Total={total_scans}, Page={page}/{total_pages}, Showing={len(paginated_scans)}")
     
-    # Calculate trend data for current page only
-    trend_data = analytics.calculate_vulnerability_trends(paginated_scans)
+    # Calculate trend data from ALL filtered scans (not just current page)
+    trend_data = analytics.calculate_vulnerability_trends(filtered_scans)
     
     # Check for DEBUG_DASHBOARD environment variable
     debug_mode = os.environ.get('DEBUG_DASHBOARD', '').lower() in ('true', '1', 'yes', 'on')
     
+    # Create lightweight scan list with pre-calculated vulnerability counts
+    # Use ALL scans (unfiltered) so JavaScript can populate branch dropdown with all branches
+    all_scans_metadata = []
+    for scan in all_project_scans:
+        # Pre-calculate vulnerability counts by severity to avoid sending full vulnerability data
+        vuln_counts = {
+            'CRITICAL': 0,
+            'HIGH': 0,
+            'MEDIUM': 0,
+            'LOW': 0
+        }
+        for vuln in scan.get('vulnerabilities', []):
+            severity = vuln.get('severity', '').upper()
+            if severity in vuln_counts:
+                vuln_counts[severity] += 1
+        
+        all_scans_metadata.append({
+            'id': scan['id'],
+            'build_number': scan['build_number'],
+            'timestamp': scan['timestamp'],
+            'branch_name': scan.get('branch_name', 'not provided'),
+            # Store vulnerability counts instead of full objects
+            'vulnerability_counts': vuln_counts,
+            'total_vulnerabilities': sum(vuln_counts.values())
+        })
+    
     return render_template('project.html',
         project=project,
         scans=paginated_scans,
-        all_scans=project_scans,
+        all_scans=all_scans_metadata,  # Only metadata, not full vulnerability data
         trend_data=trend_data,
         debug_mode=debug_mode,
         page=page,
         per_page=per_page,
         total_scans=total_scans,
-        total_pages=total_pages
+        total_pages=total_pages,
+        branch_filter=branch_filter
     )
 
 @app.route('/scan/<path:scan_id>')
@@ -774,6 +1047,18 @@ def manual_refresh():
         'status': 'refresh_triggered',
         'is_loading': app_data['is_loading'],
         'last_updated': app_data['last_updated'].isoformat() if app_data['last_updated'] else None
+    })
+
+@app.route('/api/refresh-status')
+def refresh_status():
+    """Get current refresh status for polling"""
+    return jsonify({
+        'is_loading': app_data['is_loading'],
+        'last_updated': app_data['last_updated'].isoformat() if app_data['last_updated'] else None,
+        'stats': app_data['refresh_stats'],
+        'progress': app_data['refresh_progress'],
+        'total_projects': len(app_data['projects']),
+        'total_scans': len(app_data['scans'])
     })
 
 @app.route('/api/health')
@@ -1509,6 +1794,36 @@ def _convert_trivy_to_spdx_json(trivy_data, scan):
 
 
 # ============================================================================
+# Helper function for report generation
+# ============================================================================
+
+def wait_for_refresh_completion(timeout=300):
+    """
+    Wait for any ongoing data refresh to complete before proceeding.
+    
+    Args:
+        timeout: Maximum seconds to wait (default: 300 = 5 minutes)
+        
+    Returns:
+        bool: True if refresh completed, False if timeout
+    """
+    import time
+    waited = 0
+    check_interval = 1  # Check every second
+    
+    while app_data['is_loading'] and waited < timeout:
+        logger.info(f"⏳ Waiting for data refresh to complete... ({waited}s)")
+        time.sleep(check_interval)
+        waited += check_interval
+    
+    if app_data['is_loading']:
+        logger.warning(f"⚠️ Timeout waiting for refresh after {timeout}s")
+        return False
+    
+    logger.info("✅ Data refresh completed, proceeding with report generation")
+    return True
+
+# ============================================================================
 # PDF Report Export API
 # ============================================================================
 
@@ -1534,6 +1849,15 @@ def export_projects_pdf():
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     
     logger.info("📄 Generating PDF report for projects")
+    
+    # Wait for any ongoing data refresh to complete
+    if app_data['is_loading']:
+        logger.info("⏳ Data refresh in progress, waiting for completion...")
+        if not wait_for_refresh_completion():
+            return jsonify({
+                'error': 'Timeout waiting for data refresh to complete',
+                'message': 'Please try again in a few moments'
+            }), 503
     
     # Get timezone parameter (default to IST)
     tz_name = request.args.get('timezone', 'Asia/Kolkata')
@@ -1906,6 +2230,15 @@ def export_projects_csv():
     import pytz
     
     logger.info("📄 Generating CSV report for projects")
+    
+    # Wait for any ongoing data refresh to complete
+    if app_data['is_loading']:
+        logger.info("⏳ Data refresh in progress, waiting for completion...")
+        if not wait_for_refresh_completion():
+            return jsonify({
+                'error': 'Timeout waiting for data refresh to complete',
+                'message': 'Please try again in a few moments'
+            }), 503
     
     # Get timezone parameter (default to IST)
     tz_name = request.args.get('timezone', 'Asia/Kolkata')

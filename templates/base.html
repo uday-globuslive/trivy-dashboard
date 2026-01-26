@@ -124,7 +124,7 @@
                     <span class="visually-hidden">Loading...</span>
                 </div>
                 <h5>Loading Security Data...</h5>
-                <p>Fetching latest vulnerability information from Nexus Repository</p>
+                <p>Fetching latest vulnerability information from {{ artifactory_name }}</p>
             </div>
         </div>
     </div>
@@ -137,7 +137,7 @@
                 <span class="visually-hidden">Loading...</span>
             </div>
             <div>
-                <strong>Loading data from Nexus Repository...</strong>
+                <strong>Loading data from {{ artifactory_name }}...</strong>
                 <br><small>This may take a few moments while we fetch and process the latest security scan results.</small>
             </div>
         </div>
@@ -205,20 +205,45 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'refresh_triggered') {
-                        // Show success message and reload page after delay
-                        showAlert('Data refresh initiated. Page will reload shortly...', 'info');
-                        setTimeout(() => {
-                            location.reload();
-                        }, 3000);
+                        // Show success message and start polling
+                        showAlert('Data refresh initiated. Waiting for completion...', 'info');
+                        pollRefreshStatus();
                     }
                 })
                 .catch(error => {
                     console.error('Error refreshing data:', error);
                     showAlert('Failed to refresh data. Please try again.', 'danger');
-                })
-                .finally(() => {
                     hideLoading();
                 });
+        }
+        
+        function pollRefreshStatus() {
+            const pollInterval = setInterval(() => {
+                fetch('/api/refresh-status')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (!data.is_loading) {
+                            // Refresh complete
+                            clearInterval(pollInterval);
+                            const stats = data.stats;
+                            const statsMsg = `New: ${stats.new_files}, Updated: ${stats.updated_files}, Unchanged: ${stats.unchanged_files}`;
+                            showAlert(`Refresh complete! ${statsMsg}. Reloading page...`, 'success');
+                            setTimeout(() => {
+                                location.reload();
+                            }, 2000);
+                        } else {
+                            // Still loading, update message
+                            const stats = data.stats;
+                            showAlert(`Refreshing... Processing files (${stats.new_files} new, ${stats.updated_files} updated)`, 'info');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error polling refresh status:', error);
+                        clearInterval(pollInterval);
+                        hideLoading();
+                        showAlert('Refresh status check failed. Please reload manually.', 'warning');
+                    });
+            }, 1000); // Poll every second
         }
 
         function showLoading() {

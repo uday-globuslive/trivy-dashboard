@@ -194,8 +194,8 @@
         <h6 class="m-0 font-weight-bold text-primary">Recent Scans</h6>
         <div class="d-flex align-items-center">
             <label for="tableBranchFilter" class="me-2 mb-0 small text-muted">Branch/Environment:</label>
-            <select id="tableBranchFilter" class="form-select form-select-sm" style="width: auto; min-width: 150px;" onchange="filterTableByBranch()">
-                <option value="all">All</option>
+            <select id="tableBranchFilter" class="form-select form-select-sm" style="width: auto; min-width: 150px;" onchange="reloadWithBranch(this.value)">
+                <option value="all" {% if branch_filter == 'all' %}selected{% endif %}>All</option>
                 <!-- Options will be populated by JavaScript -->
             </select>
         </div>
@@ -260,7 +260,7 @@
                 <ul class="pagination mb-0">
                     <!-- Previous Button -->
                     <li class="page-item {% if page <= 1 %}disabled{% endif %}">
-                        <a class="page-link" href="?page={{ page - 1 }}&per_page={{ per_page }}" {% if page <= 1 %}tabindex="-1" aria-disabled="true"{% endif %}>
+                        <a class="page-link" href="?page={{ page - 1 }}&per_page={{ per_page }}{% if branch_filter != 'all' %}&branch={{ branch_filter | urlencode }}{% endif %}" {% if page <= 1 %}tabindex="-1" aria-disabled="true"{% endif %}>
                             <i class="fas fa-chevron-left"></i> Previous
                         </a>
                     </li>
@@ -271,7 +271,7 @@
                     
                     {% if start_page > 1 %}
                         <li class="page-item">
-                            <a class="page-link" href="?page=1&per_page={{ per_page }}">1</a>
+                            <a class="page-link" href="?page=1&per_page={{ per_page }}{% if branch_filter != 'all' %}&branch={{ branch_filter | urlencode }}{% endif %}">1</a>
                         </li>
                         {% if start_page > 2 %}
                             <li class="page-item disabled"><span class="page-link">...</span></li>
@@ -280,7 +280,7 @@
                     
                     {% for p in range(start_page, end_page + 1) %}
                         <li class="page-item {% if p == page %}active{% endif %}">
-                            <a class="page-link" href="?page={{ p }}&per_page={{ per_page }}">{{ p }}</a>
+                            <a class="page-link" href="?page={{ p }}&per_page={{ per_page }}{% if branch_filter != 'all' %}&branch={{ branch_filter | urlencode }}{% endif %}">{{ p }}</a>
                         </li>
                     {% endfor %}
                     
@@ -289,13 +289,13 @@
                             <li class="page-item disabled"><span class="page-link">...</span></li>
                         {% endif %}
                         <li class="page-item">
-                            <a class="page-link" href="?page={{ total_pages }}&per_page={{ per_page }}">{{ total_pages }}</a>
+                            <a class="page-link" href="?page={{ total_pages }}&per_page={{ per_page }}{% if branch_filter != 'all' %}&branch={{ branch_filter | urlencode }}{% endif %}">{{ total_pages }}</a>
                         </li>
                     {% endif %}
                     
                     <!-- Next Button -->
                     <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
-                        <a class="page-link" href="?page={{ page + 1 }}&per_page={{ per_page }}" {% if page >= total_pages %}tabindex="-1" aria-disabled="true"{% endif %}>
+                        <a class="page-link" href="?page={{ page + 1 }}&per_page={{ per_page }}{% if branch_filter != 'all' %}&branch={{ branch_filter | urlencode }}{% endif %}" {% if page >= total_pages %}tabindex="-1" aria-disabled="true"{% endif %}>
                             Next <i class="fas fa-chevron-right"></i>
                         </a>
                     </li>
@@ -304,7 +304,7 @@
             
             <!-- Per Page Selector -->
             <div class="form-group mb-0">
-                <select class="form-select form-select-sm" onchange="window.location.href='?page=1&per_page=' + this.value" style="width: auto;">
+                <select class="form-select form-select-sm" onchange="changePerPage(this.value)" style="width: auto;">
                     <option value="10" {% if per_page == 10 %}selected{% endif %}>10 per page</option>
                     <option value="25" {% if per_page == 25 %}selected{% endif %}>25 per page</option>
                     <option value="50" {% if per_page == 50 %}selected{% endif %}>50 per page</option>
@@ -378,21 +378,34 @@ function renderVulnerabilityTrendChart(filteredScans = null) {
     });
     
     const criticalData = sortedScans.map(scan => {
+        // Use pre-calculated counts if available, otherwise fall back to filtering vulnerabilities
+        if (scan.vulnerability_counts) {
+            return scan.vulnerability_counts.CRITICAL || 0;
+        }
         const count = scan.vulnerabilities ? scan.vulnerabilities.filter(v => v.severity === 'CRITICAL').length : 0;
         return count;
     });
     
     const highData = sortedScans.map(scan => {
+        if (scan.vulnerability_counts) {
+            return scan.vulnerability_counts.HIGH || 0;
+        }
         const count = scan.vulnerabilities ? scan.vulnerabilities.filter(v => v.severity === 'HIGH').length : 0;
         return count;
     });
     
     const mediumData = sortedScans.map(scan => {
+        if (scan.vulnerability_counts) {
+            return scan.vulnerability_counts.MEDIUM || 0;
+        }
         const count = scan.vulnerabilities ? scan.vulnerabilities.filter(v => v.severity === 'MEDIUM').length : 0;
         return count;
     });
     
     const lowData = sortedScans.map(scan => {
+        if (scan.vulnerability_counts) {
+            return scan.vulnerability_counts.LOW || 0;
+        }
         const count = scan.vulnerabilities ? scan.vulnerabilities.filter(v => v.severity === 'LOW').length : 0;
         return count;
     });
@@ -592,10 +605,35 @@ function populateTableBranchFilter() {
         tableBranchFilter.appendChild(option);
     });
     
-    if (window.debugLog) window.debugLog(`Populated ${sortedBranches.length} branches in table filter`);
+    // Set the selected value from URL parameter (server-side filter)
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentBranch = urlParams.get('branch') || 'all';
+    tableBranchFilter.value = currentBranch;
+    
+    if (window.debugLog) window.debugLog(`Populated ${sortedBranches.length} branches in table filter, selected: ${currentBranch}`);
 }
 
-// Filter table by branch
+// Reload page with branch filter
+function reloadWithBranch(branch) {
+    const currentUrl = new URL(window.location.href);
+    if (branch === 'all') {
+        currentUrl.searchParams.delete('branch');
+    } else {
+        currentUrl.searchParams.set('branch', branch);
+    }
+    currentUrl.searchParams.set('page', '1'); // Reset to first page
+    window.location.href = currentUrl.toString();
+}
+
+// Change per page selector while preserving branch filter
+function changePerPage(perPage) {
+    const currentUrl = new URL(window.location.href);
+    currentUrl.searchParams.set('page', '1');
+    currentUrl.searchParams.set('per_page', perPage);
+    window.location.href = currentUrl.toString();
+}
+
+// Filter table by branch (client-side, deprecated but kept for compatibility)
 function filterTableByBranch() {
     const selectedBranch = document.getElementById('tableBranchFilter').value;
     const tableBody = document.querySelector('.table-responsive table tbody');
@@ -703,7 +741,14 @@ function calculateRiskScore(scans) {
     let lastScan = null;
     
     scans.forEach(scan => {
-        if (scan.vulnerabilities) {
+        // Use vulnerability_counts if available (from metadata), otherwise try vulnerabilities array
+        if (scan.vulnerability_counts) {
+            criticalCount += scan.vulnerability_counts.CRITICAL || 0;
+            highCount += scan.vulnerability_counts.HIGH || 0;
+            mediumCount += scan.vulnerability_counts.MEDIUM || 0;
+            lowCount += scan.vulnerability_counts.LOW || 0;
+        } else if (scan.vulnerabilities) {
+            // Fallback for backward compatibility
             scan.vulnerabilities.forEach(vuln => {
                 const severity = (vuln.severity || '').toUpperCase();
                 if (severity === 'CRITICAL') criticalCount++;
