@@ -45,17 +45,22 @@ class JFrogClient:
             logger.error(f"❌ JFrog connection test failed: {str(e)}")
             return False
     
-    def list_trivy_files(self, limit=1000):
+    def list_trivy_files(self, limit=None):
         """
         List all Trivy report files in the JFrog repository.
         
         Uses JFrog AQL (Artifactory Query Language) to search for trivy report files.
+        
+        Args:
+            limit: Maximum number of files to return. None = fetch all files (recommended for accurate incremental refresh)
         """
         from config import Config
         
         logger.info(f"📋 Listing Trivy report files from repository: {self.repository}")
         logger.info(f"🔍 Searching for: groupId={Config.JFROG_GROUP_ID}, suffix={Config.JFROG_ARTIFACT_SUFFIX}, extension={Config.JFROG_ASSET_EXTENSION}")
         logger.info(f"🌐 JFrog URL: {self.jfrog_url}")
+        if limit:
+            logger.warning(f"⚠️ Limit set to {limit} files - deleted files beyond this limit won't be detected!")
         
         sbom_files = []
         try:
@@ -68,8 +73,9 @@ class JFrogClient:
                 "name": {"$match": f"*{Config.JFROG_ARTIFACT_SUFFIX}.{Config.JFROG_ASSET_EXTENSION}"}
             }
             
-            # Convert AQL query to proper format
-            aql_string = f'items.find({json.dumps(aql_query)}).limit({limit})'
+            # Convert AQL query to proper format - use large limit if None specified
+            query_limit = limit if limit is not None else 10000  # JFrog AQL max limit
+            aql_string = f'items.find({json.dumps(aql_query)}).limit({query_limit})'
             
             logger.info(f"🔍 AQL Query: {aql_string}")
             
@@ -136,6 +142,8 @@ class JFrogClient:
                     
                     # Get timestamp from JFrog metadata
                     timestamp = self._parse_timestamp(asset.get('modified', ''))
+                    # Store raw modified timestamp for incremental refresh comparison
+                    last_modified_str = asset.get('modified', '')
                     
                     # Construct proper download URL
                     download_url = f"{self.jfrog_url}/artifactory/{repo}/{full_path}"
@@ -146,6 +154,7 @@ class JFrogClient:
                         'build_number': build_number,
                         'branch_name': branch_name,
                         'timestamp': timestamp,
+                        'lastModified': last_modified_str,  # For incremental refresh comparison
                         'size': asset.get('size', 0),
                         'group_id': '/'.join(group_parts),
                         'artifact_id': artifact_id,
@@ -163,11 +172,16 @@ class JFrogClient:
             
             logger.info(f"📦 Found {len(sbom_files)} Trivy report files")
             
+            # Sort by timestamp descending to get NEWEST files first for incremental refresh
+            sbom_files.sort(key=lambda x: x.get('timestamp') or datetime.min, reverse=True)
+            logger.info(f"📊 Sorted {len(sbom_files)} files by timestamp (newest first)")
+            
             # Log a few examples for debugging
             if sbom_files:
-                logger.info("📋 Sample Trivy report files found:")
+                logger.info("📋 Sample Trivy report files found (newest first):")
                 for i, sbom in enumerate(sbom_files[:3]):
-                    logger.info(f"  {i+1}. {sbom['project']} - {sbom['version']} - {sbom['path']}")
+                    timestamp_str = sbom['timestamp'].strftime('%Y-%m-%d %H:%M:%S') if sbom.get('timestamp') else 'unknown'
+                    logger.info(f"  {i+1}. {sbom['project']} - {sbom['version']} - {timestamp_str}")
             
             return sbom_files
             

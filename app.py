@@ -22,6 +22,7 @@ from services.trivy_parser import TrivyReportParser
 from services.analytics import SecurityAnalytics
 from services.hybrid_sbom_parser import HybridSBOMParser
 from utils.cache import CacheManager
+from utils.metadata_tracker import MetadataTracker
 from utils.helpers import format_timestamp, calculate_risk_score
 from config import Config
 
@@ -62,6 +63,7 @@ artifactory_client = create_artifactory_client()
 trivy_parser = TrivyReportParser()
 analytics = SecurityAnalytics()
 cache_manager = CacheManager()
+metadata_tracker = MetadataTracker()  # File-based metadata tracking for incremental refresh
 
 # Maintain backward compatibility - nexus_client is now artifactory_client
 nexus_client = artifactory_client
@@ -74,7 +76,6 @@ app_data = {
     'last_updated': None,
     'is_loading': False,
     'force_refresh': False,  # Flag to force immediate refresh
-    'file_metadata': {},  # Track file paths and their last modified times for incremental updates
     'refresh_stats': {  # Statistics about last refresh
         'total_files': 0,
         'new_files': 0,
@@ -139,27 +140,36 @@ def refresh_data_background():
                 app_data['refresh_progress']['total_count'] = len(trivy_files)
                 app_data['refresh_progress']['phase'] = 'processing'
                 
+                # Check if in-memory data is empty (app just started or was cleared)
+                has_data_in_memory = len(app_data.get('scans', {})) > 0
+                
+                # Force full refresh if: explicitly requested OR no data in memory
+                needs_full_refresh = is_force_refresh or not has_data_in_memory
+                
                 # Use existing data or create new dictionaries for force refresh
-                if is_force_refresh:
-                    logger.info("🔃 Force refresh - reloading ALL data from scratch")
-                    # Start completely fresh - load only what's currently in JFrog
+                if needs_full_refresh:
+                    if not has_data_in_memory:
+                        logger.info("🔃 First load - fetching ALL data (no data in memory)")
+                    else:
+                        logger.info("🔃 Force refresh - reloading ALL data from scratch")
+                    # Start completely fresh - load only what's currently in repository
                     projects = {}
                     scans = {}
                     vulnerabilities = {}
-                    file_metadata = {}
-                    # Clear app_data immediately so UI shows empty state during reload
-                    app_data['projects'] = {}
-                    app_data['scans'] = {}
-                    app_data['vulnerabilities'] = {}
-                    app_data['file_metadata'] = {}
-                    logger.info("🗑️ Cleared all existing data from app_data")
+                    # Clear metadata tracker only on explicit force refresh
+                    if is_force_refresh:
+                        metadata_tracker.clear_all()
+                        # Clear app_data immediately so UI shows empty state during reload
+                        app_data['projects'] = {}
+                        app_data['scans'] = {}
+                        app_data['vulnerabilities'] = {}
+                        logger.info("🗑️ Cleared all existing data from app_data and metadata file")
                 else:
                     # Incremental update - start with existing data
                     logger.info("⚡ Incremental refresh - only updating changed files")
                     projects = app_data['projects'].copy()
                     scans = app_data['scans'].copy()
                     vulnerabilities = app_data['vulnerabilities'].copy()
-                    file_metadata = app_data['file_metadata'].copy()
                     
                 processed_count = 0
                 skipped_count = 0
@@ -179,20 +189,19 @@ def refresh_data_background():
                         if len(trivy_files) > 0:
                             app_data['refresh_progress']['percentage'] = int((processed_count + skipped_count) * 100 / len(trivy_files))
                         
-                        # Check if file has changed (compare last modified time)
+                        # Check if file has changed using persistent metadata tracker
                         file_last_modified = trivy_file.get('lastModified', trivy_file.get('last_modified', ''))
                         
-                        # Skip unchanged files during incremental refresh ONLY
-                        if not is_force_refresh and file_path in file_metadata:
-                            if file_metadata[file_path].get('last_modified') == file_last_modified:
-                                logger.debug(f"⏭️ Skipping unchanged file: {file_path}")
-                                app_data['refresh_stats']['unchanged_files'] += 1
-                                skipped_count += 1
-                                continue
-                            else:
-                                logger.info(f"📝 File changed: {file_path}")
-                        elif is_force_refresh:
-                            logger.debug(f"📄 Force refresh - processing: {file_path}")
+                        # Skip unchanged files ONLY during incremental refresh (not on first load)
+                        if not needs_full_refresh and not metadata_tracker.has_changed(file_path, file_last_modified):
+                            logger.debug(f"⏭️ Skipping unchanged file: {file_path}")
+                            app_data['refresh_stats']['unchanged_files'] += 1
+                            skipped_count += 1
+                            continue
+                        elif not needs_full_refresh and metadata_tracker.has_file(file_path):
+                            logger.info(f"📝 File changed: {file_path}")
+                        elif needs_full_refresh:
+                            logger.debug(f"📄 Full refresh - processing: {file_path}")
                         else:
                             logger.info(f"✨ New file: {file_path}")
                         
@@ -294,14 +303,9 @@ def refresh_data_background():
                                 'details': vuln
                             })
                         
-                        # Update file metadata
-                        is_new_file = file_path not in file_metadata
-                        file_metadata[file_path] = {
-                            'last_modified': file_last_modified,
-                            'last_processed': datetime.now().isoformat(),
-                            'project_key': project_key,
-                            'scan_id': scan_id
-                        }
+                        # Update persistent metadata tracker
+                        is_new_file = not metadata_tracker.has_file(file_path)
+                        metadata_tracker.update_file(file_path, file_last_modified, project_key, scan_id)
                         
                         if is_new_file:
                             app_data['refresh_stats']['new_files'] += 1
@@ -320,27 +324,22 @@ def refresh_data_background():
                         logger.error(f"Traceback: {traceback.format_exc()}")
                         continue
                 
-                # Clean up deleted files (for incremental refresh only, force refresh already skipped them)
-                # For incremental, we need to remove from existing dictionaries
-                if not is_force_refresh:
+                # Clean up deleted files (for incremental refresh only)
+                if not needs_full_refresh:
                     app_data['refresh_progress']['phase'] = 'cleaning'
-                    # Check against the ORIGINAL metadata from app_data, not the local copy
-                    metadata_to_check = app_data['file_metadata'].copy()
                     
-                    logger.info(f"🔍 Incremental deletion check: metadata has {len(metadata_to_check)} files, current has {len(current_file_paths)} files")
+                    # Use metadata_tracker to find deleted files
+                    deleted_files = metadata_tracker.get_deleted_files(current_file_paths)
                     
-                    deleted_files = set(metadata_to_check.keys()) - current_file_paths
+                    logger.info(f"🔍 Incremental deletion check: tracked {len(metadata_tracker.get_all_files())} files, current has {len(current_file_paths)} files")
+                    
                     if deleted_files:
                         logger.info(f"🔍 Found {len(deleted_files)} deleted files in incremental refresh:")
-                        for df in list(deleted_files)[:5]:  # Log first 5
-                            logger.info(f"  - {df}")
+                        for df_path, df_proj, df_scan in list(deleted_files)[:5]:  # Log first 5
+                            logger.info(f"  - {df_path} (project: {df_proj}, scan: {df_scan})")
                     
-                    for deleted_file in deleted_files:
-                        metadata = metadata_to_check[deleted_file]
-                        scan_id = metadata.get('scan_id')
-                        project_key = metadata.get('project_key')
-                        
-                        logger.info(f"🗑️ Removing from incremental: file={deleted_file}, scan={scan_id}")
+                    for file_path, project_key, scan_id in deleted_files:
+                        logger.info(f"🗑️ Removing deleted file: {file_path}, project={project_key}, scan={scan_id}")
                         
                         # Remove scan
                         if scan_id and scan_id in scans:
@@ -348,6 +347,7 @@ def refresh_data_background():
                             deleted_scan = scans[scan_id]
                             del scans[scan_id]
                             logger.info(f"🗑️ Removed deleted scan from scans dict: {scan_id}")
+                            app_data['refresh_stats']['deleted_scans'] = app_data['refresh_stats'].get('deleted_scans', 0) + 1
                             
                             # Clean up vulnerabilities dictionary - remove references to this scan
                             for vuln in deleted_scan.get('vulnerabilities', []):
@@ -367,10 +367,11 @@ def refresh_data_background():
                             if scan_id in projects[project_key].get('scans', []):
                                 projects[project_key]['scans'].remove(scan_id)
                                 logger.debug(f"📝 Removed scan {scan_id} from project {project_key}")
-                        
-                        # Remove from metadata
-                        if deleted_file in file_metadata:
-                            del file_metadata[deleted_file]
+                            
+                            # If project has no more scans, remove the project entirely
+                            if not projects[project_key].get('scans'):
+                                logger.info(f"🗑️ Removing project {project_key} - no scans remaining")
+                                del projects[project_key]
                         
                         app_data['refresh_stats']['deleted_files'] += 1
                     
@@ -378,11 +379,11 @@ def refresh_data_background():
                         logger.info(f"🗑️ Cleaned up {len(deleted_files)} deleted files in incremental refresh")
                     
                     # Recalculate project statistics after deletions
+                    # Collect unique project_keys from deleted files (already have them from earlier loop)
                     projects_to_recalculate = set()
-                    for deleted_file in deleted_files:
-                        metadata = metadata_to_check.get(deleted_file)
-                        if metadata:
-                            projects_to_recalculate.add(metadata.get('project_key'))
+                    for file_path, project_key, scan_id in deleted_files:
+                        if project_key:
+                            projects_to_recalculate.add(project_key)
                     
                     # For each affected project, recalculate statistics from remaining scans
                     for project_key in projects_to_recalculate:
@@ -443,9 +444,13 @@ def refresh_data_background():
                 app_data['projects'] = projects
                 app_data['scans'] = scans
                 app_data['vulnerabilities'] = vulnerabilities
-                app_data['file_metadata'] = file_metadata
                 app_data['last_updated'] = datetime.now()
                 app_data['is_loading'] = False
+                
+                # Save metadata tracker to disk for persistence across restarts
+                metadata_tracker.save()
+                metadata_stats = metadata_tracker.get_stats()
+                logger.info(f"💾 Saved metadata tracker to disk: {metadata_stats['total_files']} files, {metadata_stats['metadata_size_bytes']} bytes")
                 
                 # Mark progress as complete
                 app_data['refresh_progress']['phase'] = 'complete'

@@ -45,7 +45,7 @@ class NexusClient:
             logger.error(f"❌ Nexus connection test failed: {str(e)}")
             return False
     
-    def list_trivy_files(self, limit=1000):
+    def list_trivy_files(self, limit=None):
         """
         List all Trivy report files in the Nexus repository.
         
@@ -53,12 +53,17 @@ class NexusClient:
         - Repository: mccamish_sbom
         - Path: com/mccamish/{project}/{version}/{project}-{version}-trivy-report.json
         - Example: com/mccamish/Mart_Trivy_Scan/1.0.0-20250924044857/Mart_Trivy_Scan-1.0.0-20250924044857-trivy-report.json
+        
+        Args:
+            limit: Maximum number of files to return. None = fetch all files (recommended for accurate incremental refresh)
         """
         from config import Config
         
         logger.info(f"📋 Listing Trivy report files from repository: {self.repository}")
         logger.info(f"🔍 Searching for: groupId={Config.NEXUS_GROUP_ID}, suffix={Config.NEXUS_ARTIFACT_SUFFIX}, extension={Config.NEXUS_ASSET_EXTENSION}")
         logger.info(f"🌐 Nexus URL: {self.nexus_url}")
+        if limit:
+            logger.warning(f"⚠️ Limit set to {limit} files - deleted files beyond this limit won't be detected!")
         
         sbom_files = []
         try:
@@ -66,7 +71,8 @@ class NexusClient:
             search_url = f"{self.nexus_url}/service/rest/v1/search/assets"
             params = {
                 'repository': self.repository,
-                'group': Config.NEXUS_GROUP_ID
+                'group': Config.NEXUS_GROUP_ID,
+                'sort': 'version',  # Sort by version for consistent ordering
                 # Removed extension filter to see all files first
             }
             
@@ -76,7 +82,8 @@ class NexusClient:
             continuation_token = None
             processed_count = 0
             
-            while processed_count < limit:
+            # Fetch all pages unless limit is specified
+            while limit is None or processed_count < limit:
                 if continuation_token:
                     params['continuationToken'] = continuation_token
                     
@@ -135,6 +142,8 @@ class NexusClient:
                         
                         # Get timestamp from Nexus metadata
                         timestamp = self._parse_timestamp(asset.get('lastModified', ''))
+                        # Store raw lastModified string for incremental refresh comparison
+                        last_modified_str = asset.get('lastModified', '')
                         
                         # Construct proper download URL - use downloadUrl from API if available
                         final_download_url = download_url if download_url else f"{self.nexus_url}/repository/{self.repository}/{asset_path}"
@@ -145,6 +154,7 @@ class NexusClient:
                             'build_number': build_number,
                             'branch_name': branch_name,
                             'timestamp': timestamp,
+                            'lastModified': last_modified_str,  # For incremental refresh comparison
                             'size': asset.get('fileSize', 0),
                             'group_id': '/'.join(group_parts),  # 'com/mccamish'
                             'artifact_id': artifact_id,
@@ -157,7 +167,9 @@ class NexusClient:
                         sbom_files.append(sbom_file)
                         processed_count += 1
                         
-                        if processed_count >= limit:
+                        # Only break if limit is set and reached
+                        if limit is not None and processed_count >= limit:
+                            logger.warning(f"⚠️ Reached limit of {limit} files - stopping fetch")
                             break
                             
                     except Exception as e:
@@ -171,11 +183,16 @@ class NexusClient:
             
             logger.info(f"📦 Found {len(sbom_files)} Trivy report files")
             
+            # Sort by timestamp descending to get NEWEST files first for incremental refresh
+            sbom_files.sort(key=lambda x: x.get('timestamp') or datetime.min, reverse=True)
+            logger.info(f"📊 Sorted {len(sbom_files)} files by timestamp (newest first)")
+            
             # Log a few examples for debugging
             if sbom_files:
-                logger.info("📋 Sample Trivy report files found:")
+                logger.info("📋 Sample Trivy report files found (newest first):")
                 for i, sbom in enumerate(sbom_files[:3]):
-                    logger.info(f"  {i+1}. {sbom['project']} - {sbom['version']} - {sbom['path']}")
+                    timestamp_str = sbom['timestamp'].strftime('%Y-%m-%d %H:%M:%S') if sbom.get('timestamp') else 'unknown'
+                    logger.info(f"  {i+1}. {sbom['project']} - {sbom['version']} - {timestamp_str}")
             
             return sbom_files
             

@@ -63,6 +63,7 @@ instance/
 *.db
 *.sqlite
 *.sqlite3
+**/.trivy_metadata.json
 
 # Node (if used)
 node_modules/
